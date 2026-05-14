@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:microlab/theme/app_theme.dart';
 import '../customer/customer_home_screen.dart';
+import '../technician/technician_dashboard_screen.dart';
 
 class OtpScreen extends StatefulWidget {
   final String mobile;
@@ -171,10 +172,18 @@ class _OtpScreenState extends State<OtpScreen> {
     );
 
     // TODO: Navigate to home
-    // Navigator.pushAndRemoveUntil(context,
-    //   MaterialPageRoute(builder: (_) => widget.userRole == 'customer'
-    //       ? CustomerHomeScreen() : TechnicianHomeScreen()),
-    //   (route) => false);
+    if (widget.userRole == 'technician') {
+      Navigator.pushAndRemoveUntil(
+        context,
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => TechnicianDashboardScreen(mobile: widget.mobile),
+          transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+          transitionDuration: const Duration(milliseconds: 400),
+        ),
+        (route) => false,
+      );
+      return;
+    }
   }
 
   Future<void> _resend() async {

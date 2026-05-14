@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>NSCameraUsageDescription</key>
-    <string>MediCollect needs camera access to take a customer profile photo.</string>
+    <string>MicroLab needs camera access to take a customer profile photo.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>MediCollect needs gallery access to select a customer profile photo.</string>
+    <string>MicroLab needs gallery access to select a customer profile photo.</string>
     <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>MediCollect needs permission to save photos.</string>
+    <string>MicroLab needs permission to save photos.</string>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleExecutable</key>
@@ -17,7 +17,7 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>MediCollect</string>
+    <string>MicroLab</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

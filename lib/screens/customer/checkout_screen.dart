@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:microlab/services/razorpay_service.dart';
 import 'package:microlab/theme/app_theme.dart';
 import 'customer_dashboard_screen.dart';
 import 'customer_home_screen.dart';
@@ -94,6 +95,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool get _canProceed => _selectedDate != null && _selectedSlot != null && (!widget.isVip || _selectedTechnician != null);
 
   // ── Date picker (future only) ─────────────────────────────
+  @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    clearRazorpay();
+    super.dispose();
+  }
+
   Future<void> _pickDate() async {
     final now = DateTime.now();
     final tomorrow = now.add(const Duration(days: 1));
@@ -144,28 +156,64 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // ── Show payment method sheet, then confirm ──────────────
+  // ── Open Razorpay checkout ───────────────────────────────
   void _proceedToPayment() {
     if (!_canProceed) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _PaymentMethodSheet(
-        amount: _payableNow,
-        onPaid: (method) {
-          Navigator.pop(context); // close sheet
-          _confirmBooking(method);
-        },
-      ),
+    setState(() => _isProcessing = true);
+
+    // TODO: fetch order_id from your backend first
+    // POST /api/payment/create-order { amount: _payableNow, currency: 'INR' }
+    // then use response['order_id'] below
+
+    final options = {
+      'key': 'rzp_test_SonqjjPurqlLci', // replace with your Razorpay key
+      'amount': (_payableNow * 100).toInt(), // paise
+      'name': 'MicroLab',
+      'description': widget.cart.map((t) => t.name).join(', '),
+      'prefill': {
+        'contact': widget.member.mobile,
+        'email': widget.member.email ?? '',
+        'name': widget.member.name,
+      },
+      'notes': {
+        'booking_mode': widget.mode,
+        'customer_name': widget.member.name,
+        'tests': widget.cart.map((t) => t.name).join(', '),
+      },
+      'theme': {
+        'color': '#0A5C4A',
+      },
+      'retry': {
+        'enabled': true,
+        'max_count': 2,
+      },
+    };
+
+    openRazorpay(
+      options: options,
+      onSuccess: (paymentId) => _confirmBooking(paymentId),
+      onError: (message) {
+        setState(() => _isProcessing = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            message == 'Payment cancelled'
+                ? 'Payment cancelled'
+                : 'Payment failed: $message'),
+          backgroundColor: message == 'Payment cancelled'
+              ? AppColors.textSecondary
+              : Colors.red[700],
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ));
+      },
     );
   }
 
-  // ── Confirm booking after payment method chosen ────────
-  Future<void> _confirmBooking(String paymentMethod) async {
+  // ── Confirm booking after Razorpay success ───────────
+  Future<void> _confirmBooking(String razorpayPaymentId) async {
     setState(() => _isProcessing = true);
 
-    // TODO: POST /api/bookings { ...bookingData, payment_method: paymentMethod }
+    // TODO: POST /api/bookings { ...bookingData, razorpay_payment_id: razorpayPaymentId }
     await Future.delayed(const Duration(milliseconds: 1200));
 
     final booking = BookingModel(
@@ -611,7 +659,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ? const SizedBox(width: 20, height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
-                    : Text('Pay ₹${_payableNow.toInt()} · Choose Payment',
+                    : Text('Pay ₹${_payableNow.toInt()} via Razorpay',
                         style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500)),
               ),
             ),
@@ -623,508 +671,22 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 }
 
 
-// ─── Payment Method Sheet ─────────────────────────────────────────────────────
 
-class _PaymentMethodSheet extends StatefulWidget {
-  final double amount;
-  final void Function(String method) onPaid;
-
-  const _PaymentMethodSheet({required this.amount, required this.onPaid});
-
-  @override
-  State<_PaymentMethodSheet> createState() => _PaymentMethodSheetState();
-}
-
-class _PaymentMethodSheetState extends State<_PaymentMethodSheet> {
-  String? _selected; // selected payment method id
-  String? _selectedUpi; // selected UPI app
-  bool _isProcessing = false;
-
-  final List<_PayMethod> _methods = const [
-    _PayMethod(id: 'upi', label: 'UPI', subtitle: 'Pay via UPI apps', icon: Icons.account_balance_wallet_outlined, color: Color(0xFF6A1B9A)),
-    _PayMethod(id: 'card', label: 'Credit / Debit Card', subtitle: 'Visa, Mastercard, RuPay', icon: Icons.credit_card_outlined, color: Color(0xFF1565C0)),
-    _PayMethod(id: 'netbanking', label: 'Net Banking', subtitle: 'All major banks', icon: Icons.account_balance_outlined, color: Color(0xFF00695C)),
-    _PayMethod(id: 'wallet', label: 'Wallet', subtitle: 'Paytm, PhonePe, Amazon Pay', icon: Icons.account_balance_wallet_outlined, color: Color(0xFFE65100)),
-  ];
-
-  final List<_UpiApp> _upiApps = const [
-    _UpiApp(id: 'gpay',    label: 'Google Pay',  color: Color(0xFF1A73E8)),
-    _UpiApp(id: 'phonepe', label: 'PhonePe',     color: Color(0xFF5F259F)),
-    _UpiApp(id: 'paytm',   label: 'Paytm',       color: Color(0xFF00BAF2)),
-    _UpiApp(id: 'bhim',    label: 'BHIM',        color: Color(0xFF004C97)),
-    _UpiApp(id: 'other',   label: 'Other UPI',   color: Color(0xFF43A047)),
-  ];
-
-  // UPI ID fields
-  final _upiCtrl = TextEditingController();
-  bool _showUpiId = false;
-
-  // Card fields
-  final _cardNumCtrl   = TextEditingController();
-  final _cardNameCtrl  = TextEditingController();
-  final _cardExpiryCtrl = TextEditingController();
-  final _cardCvvCtrl   = TextEditingController();
-
-  @override
-  void dispose() {
-    _upiCtrl.dispose();
-    _cardNumCtrl.dispose();
-    _cardNameCtrl.dispose();
-    _cardExpiryCtrl.dispose();
-    _cardCvvCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pay() async {
-    if (_selected == null) return;
-    setState(() => _isProcessing = true);
-    // TODO: integrate real payment gateway (Razorpay / Stripe)
-    await Future.delayed(const Duration(milliseconds: 1400));
-    if (mounted) {
-      setState(() => _isProcessing = false);
-      widget.onPaid(_selected!);
-    }
-  }
-
-  bool get _readyToPay {
-    if (_selected == null) return false;
-    if (_selected == 'upi') {
-      if (_showUpiId) return _upiCtrl.text.trim().contains('@');
-      return _selectedUpi != null;
-    }
-    if (_selected == 'card') {
-      return _cardNumCtrl.text.replaceAll(' ', '').length == 16 &&
-             _cardNameCtrl.text.trim().isNotEmpty &&
-             _cardExpiryCtrl.text.length == 5 &&
-             _cardCvvCtrl.text.length == 3;
-    }
-    return true; // netbanking, wallet — just need selection
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92),
-      child: Column(
-        children: [
-          // Handle + header
-          Center(
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 40, height: 4,
-              decoration: BoxDecoration(color: AppColors.divider, borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Choose Payment Method',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                      Text('Amount to pay: ₹${widget.amount.toInt()}',
-                          style: const TextStyle(fontSize: 13, color: AppColors.brandGreen, fontWeight: FontWeight.w500)),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.brandGreenSurface,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text('₹${widget.amount.toInt()}',
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.brandGreen)),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-
-          // Scrollable body
-          Flexible(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-
-                  // ── Method tiles ────────────────────────────
-                  ..._methods.map((m) => Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _MethodTile(
-                        method: m,
-                        selected: _selected == m.id,
-                        onTap: () => setState(() {
-                          _selected = m.id;
-                          _selectedUpi = null;
-                          _showUpiId = false;
-                        }),
-                      ),
-
-                      // UPI expanded section
-                      if (_selected == 'upi' && m.id == 'upi') ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          margin: const EdgeInsets.only(left: 8, right: 8),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: AppColors.background,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.divider),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // UPI app chips
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: _upiApps.map((app) {
-                                  final sel = _selectedUpi == app.id;
-                                  return GestureDetector(
-                                    onTap: () => setState(() {
-                                      _selectedUpi = app.id;
-                                      _showUpiId = app.id == 'other';
-                                    }),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 160),
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: sel ? app.color.withOpacity(0.1) : AppColors.white,
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: sel ? app.color : AppColors.divider,
-                                          width: sel ? 1.5 : 1,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                            width: 8, height: 8,
-                                            decoration: BoxDecoration(color: app.color, shape: BoxShape.circle),
-                                          ),
-                                          const SizedBox(width: 7),
-                                          Text(app.label,
-                                              style: TextStyle(
-                                                  fontSize: 12,
-                                                  fontWeight: sel ? FontWeight.w600 : FontWeight.w400,
-                                                  color: sel ? app.color : AppColors.textSecondary)),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-
-                              // UPI ID field (for Other)
-                              if (_showUpiId) ...[
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _upiCtrl,
-                                  onChanged: (_) => setState(() {}),
-                                  keyboardType: TextInputType.emailAddress,
-                                  style: const TextStyle(fontSize: 14),
-                                  decoration: InputDecoration(
-                                    hintText: 'Enter UPI ID (e.g. name@upi)',
-                                    hintStyle: const TextStyle(color: AppColors.textHint, fontSize: 13),
-                                    prefixIcon: const Icon(Icons.alternate_email_rounded, size: 18, color: AppColors.textHint),
-                                    filled: true, fillColor: AppColors.white,
-                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.divider)),
-                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.divider)),
-                                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.brandGreen, width: 1.5)),
-                                    contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-
-                      // Card expanded section
-                      if (_selected == 'card' && m.id == 'card') ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          margin: const EdgeInsets.only(left: 8, right: 8),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: AppColors.background,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.divider),
-                          ),
-                          child: Column(
-                            children: [
-                              // Card number
-                              _CardField(
-                                controller: _cardNumCtrl,
-                                hint: 'Card number',
-                                icon: Icons.credit_card_outlined,
-                                keyboardType: TextInputType.number,
-                                maxLength: 19,
-                                onChanged: (v) {
-                                  // Auto-space every 4 digits
-                                  final digits = v.replaceAll(' ', '');
-                                  final spaced = digits.replaceAllMapped(
-                                    RegExp(r'.{4}'),
-                                    (m) => '${m.group(0)} ',
-                                  ).trimRight();
-                                  if (spaced != v) {
-                                    _cardNumCtrl.value = TextEditingValue(
-                                      text: spaced,
-                                      selection: TextSelection.collapsed(offset: spaced.length),
-                                    );
-                                  }
-                                  setState(() {});
-                                },
-                              ),
-                              const SizedBox(height: 10),
-                              // Cardholder name
-                              _CardField(
-                                controller: _cardNameCtrl,
-                                hint: 'Cardholder name',
-                                icon: Icons.person_outline,
-                                keyboardType: TextInputType.name,
-                                onChanged: (_) => setState(() {}),
-                              ),
-                              const SizedBox(height: 10),
-                              Row(children: [
-                                Expanded(
-                                  child: _CardField(
-                                    controller: _cardExpiryCtrl,
-                                    hint: 'MM/YY',
-                                    icon: Icons.calendar_month_outlined,
-                                    keyboardType: TextInputType.number,
-                                    maxLength: 5,
-                                    onChanged: (v) {
-                                      if (v.length == 2 && !v.contains('/')) {
-                                        _cardExpiryCtrl.value = TextEditingValue(
-                                          text: '$v/',
-                                          selection: const TextSelection.collapsed(offset: 3),
-                                        );
-                                      }
-                                      setState(() {});
-                                    },
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: _CardField(
-                                    controller: _cardCvvCtrl,
-                                    hint: 'CVV',
-                                    icon: Icons.lock_outline,
-                                    keyboardType: TextInputType.number,
-                                    maxLength: 3,
-                                    obscureText: true,
-                                    onChanged: (_) => setState(() {}),
-                                  ),
-                                ),
-                              ]),
-                            ],
-                          ),
-                        ),
-                      ],
-
-                      const SizedBox(height: 10),
-                    ],
-                  )),
-
-                  // Secure payment note
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
-                      Icon(Icons.lock_outline_rounded, size: 12, color: AppColors.textHint),
-                      SizedBox(width: 4),
-                      Text('100% secure & encrypted payment',
-                          style: TextStyle(fontSize: 11, color: AppColors.textHint)),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            ),
-          ),
-
-          // Pay button
-          Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, MediaQuery.of(context).padding.bottom + 16),
-            child: SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _readyToPay && !_isProcessing ? _pay : null,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.brandGreen,
-                  disabledBackgroundColor: AppColors.brandGreen.withOpacity(0.35),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: _isProcessing
-                    ? const SizedBox(width: 20, height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
-                    : Text(
-                        _selected == null ? 'Select a payment method' : 'Pay ₹${widget.amount.toInt()}',
-                        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
-                      ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Supporting data classes ──────────────────────────────────────────────────
-
-class _PayMethod {
-  final String id;
-  final String label;
-  final String subtitle;
-  final IconData icon;
-  final Color color;
-  const _PayMethod({required this.id, required this.label, required this.subtitle, required this.icon, required this.color});
-}
-
-class _UpiApp {
-  final String id;
-  final String label;
-  final Color color;
-  const _UpiApp({required this.id, required this.label, required this.color});
-}
-
-class _MethodTile extends StatelessWidget {
-  final _PayMethod method;
-  final bool selected;
-  final VoidCallback onTap;
-  const _MethodTile({required this.method, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: selected ? method.color.withOpacity(0.05) : AppColors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? method.color : AppColors.divider,
-            width: selected ? 1.5 : 1,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(
-                color: method.color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(method.icon, size: 20, color: method.color),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(method.label,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: selected ? method.color : AppColors.textPrimary)),
-                  Text(method.subtitle,
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                ],
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              width: 20, height: 20,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: selected ? method.color : AppColors.divider,
-                  width: selected ? 5 : 1.5,
-                ),
-                color: AppColors.white,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CardField extends StatelessWidget {
-  final TextEditingController controller;
-  final String hint;
-  final IconData icon;
-  final TextInputType keyboardType;
-  final int? maxLength;
-  final bool obscureText;
-  final ValueChanged<String> onChanged;
-
-  const _CardField({
-    required this.controller,
-    required this.hint,
-    required this.icon,
-    required this.keyboardType,
-    required this.onChanged,
-    this.maxLength,
-    this.obscureText = false,
-  });
-
-  @override
-  Widget build(BuildContext context) => TextField(
-        controller: controller,
-        keyboardType: keyboardType,
-        maxLength: maxLength,
-        obscureText: obscureText,
-        onChanged: onChanged,
-        style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: const TextStyle(color: AppColors.textHint, fontSize: 13),
-          prefixIcon: Icon(icon, size: 18, color: AppColors.textHint),
-          counterText: '',
-          filled: true, fillColor: AppColors.white,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.divider)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.divider)),
-          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.brandGreen, width: 1.5)),
-          contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-        ),
-      );
-}
-
-
-// ─── Technician Tile (VIP only) ───────────────────────────────────────────────
+// ─── Technician Tile ──────────────────────────────────────────────────────────
 
 class _TechnicianTile extends StatelessWidget {
   final TechnicianModel technician;
   final bool selected;
   final VoidCallback? onTap;
-  const _TechnicianTile({required this.technician, required this.selected, required this.onTap});
+
+  const _TechnicianTile({
+    required this.technician,
+    required this.selected,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final disabled = onTap == null;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -1132,40 +694,32 @@ class _TechnicianTile extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: disabled
-              ? AppColors.background
-              : selected
-                  ? AppColors.brandGreenSurface
-                  : AppColors.white,
+          color: selected ? AppColors.brandGreenSurface : AppColors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: disabled
-                ? AppColors.divider
-                : selected
-                    ? AppColors.brandGreen
-                    : AppColors.divider,
+            color: selected ? AppColors.brandGreen : AppColors.divider,
             width: selected ? 1.5 : 1,
           ),
         ),
         child: Row(
           children: [
-            // Avatar with initials
+            // Avatar
             Container(
-              width: 44, height: 44,
+              width: 42, height: 42,
               decoration: BoxDecoration(
-                color: disabled
-                    ? AppColors.divider
-                    : selected
-                        ? AppColors.brandGreen
-                        : AppColors.brandGreenSurface,
+                color: selected
+                    ? AppColors.brandGreen
+                    : AppColors.brandGreenSurface,
                 shape: BoxShape.circle,
               ),
               child: Center(
                 child: Text(
-                  technician.name.split(' ').map((p) => p[0]).take(2).join(),
+                  technician.name.isNotEmpty
+                      ? technician.name.split(' ').map((w) => w[0]).take(2).join()
+                      : '?',
                   style: TextStyle(
                       fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                       color: selected ? Colors.white : AppColors.brandGreen),
                 ),
               ),
@@ -1177,75 +731,42 @@ class _TechnicianTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(technician.name,
-                            style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: disabled ? AppColors.textHint : AppColors.textPrimary),
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                      if (disabled)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.background,
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Text('Unavailable',
-                              style: TextStyle(fontSize: 10, color: AppColors.textHint)),
-                        ),
-                    ],
-                  ),
+                  Text(technician.name,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: selected
+                              ? AppColors.brandGreen
+                              : AppColors.textPrimary)),
                   const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      const Icon(Icons.star_rounded, size: 13, color: Color(0xFFFFB300)),
-                      const SizedBox(width: 3),
-                      Text('${technician.rating}',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                      Text(' (${technician.totalReviews})',
-                          style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                      const SizedBox(width: 10),
-                      const Icon(Icons.work_outline, size: 12, color: AppColors.textHint),
-                      const SizedBox(width: 3),
-                      Text(technician.experience,
-                          style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 4, runSpacing: 4,
-                    children: technician.specializations.map((s) => Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: disabled ? AppColors.background : AppColors.brandGreenSurface,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(s,
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: disabled ? AppColors.textHint : AppColors.brandGreen)),
-                    )).toList(),
-                  ),
+                  Row(children: [
+                    const Icon(Icons.star_rounded,
+                        size: 12, color: Color(0xFFFFB300)),
+                    const SizedBox(width: 3),
+                    Text('${technician.rating}  ·  ${technician.experience}',
+                        style: const TextStyle(
+                            fontSize: 11, color: AppColors.textSecondary)),
+                  ]),
+                  const SizedBox(height: 3),
+                  Text(technician.specializations.join(', '),
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.textHint),
+                      overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),
 
-            // Radio
-            const SizedBox(width: 8),
+            // Radio circle
             AnimatedContainer(
               duration: const Duration(milliseconds: 180),
-              width: 18, height: 18,
+              width: 20, height: 20,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: disabled ? AppColors.divider : selected ? AppColors.brandGreen : AppColors.divider,
+                  color: selected ? AppColors.brandGreen : AppColors.divider,
                   width: selected ? 5 : 1.5,
                 ),
-                color: AppColors.white,
+                color: Colors.white,
               ),
             ),
           ],

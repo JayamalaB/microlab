@@ -353,8 +353,13 @@ class _MemberCard extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(13),
-        child: Column(
-          children: [
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onBook,
+            borderRadius: BorderRadius.circular(13),
+            child: Column(
+              children: [
           ColoredBox(
             color: AppColors.white,
             child: Padding(
@@ -507,30 +512,30 @@ class _MemberCard extends StatelessWidget {
           ),
         ),
 
-          // Book strip — ClipRRect parent handles corner clipping
-          Material(
+          // Book strip — purely visual, whole card tap handles navigation
+          Container(
             color: AppColors.brandGreenSurface,
-            child: InkWell(
-              onTap: onBook,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.calendar_today_outlined,
-                        size: 13, color: AppColors.brandGreen),
-                    SizedBox(width: 6),
-                    Text('Book Blood Test',
-                        style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.brandGreen,
-                            fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.calendar_today_outlined,
+                    size: 13, color: AppColors.brandGreen),
+                SizedBox(width: 6),
+                Text('Book Blood Test',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.brandGreen,
+                        fontWeight: FontWeight.w500)),
+                SizedBox(width: 4),
+                Icon(Icons.arrow_forward_ios_rounded,
+                    size: 10, color: AppColors.brandGreen),
+              ],
             ),
           ),
           ],
+        ),
+          ),
         ),
       ),
     );
