@@ -320,7 +320,12 @@ class _TechnicianDashboardScreenState extends State<TechnicianDashboardScreen>
                 onStartCollection: () => _markInProgress(_pending[i]),
                 onComplete: () => _markCompleted(_pending[i]),
                 onManage: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => TechnicianBookingDetailScreen(booking: _pending[i]))),
+                  builder: (_) => TechnicianBookingDetailScreen(
+                    booking: _pending[i],
+                    onNewBooking: (newBooking) {
+                      setState(() => _bookings.insert(0, newBooking));
+                    },
+                  ))),
               ),
             ),
     );

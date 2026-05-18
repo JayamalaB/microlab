@@ -79,7 +79,12 @@ const List<_JourneyStep> _journeySteps = [
 
 class TechnicianBookingDetailScreen extends StatefulWidget {
   final TechnicianBooking booking;
-  const TechnicianBookingDetailScreen({super.key, required this.booking});
+  final void Function(TechnicianBooking)? onNewBooking;
+  const TechnicianBookingDetailScreen({
+    super.key,
+    required this.booking,
+    this.onNewBooking,
+  });
 
   @override
   State<TechnicianBookingDetailScreen> createState() =>
@@ -158,6 +163,53 @@ class _TechnicianBookingDetailScreenState
       );
       return Map<String, String>.from(match);
     }).toList();
+  }
+
+  void _saveNewCustomer() {
+    final name    = _ncNameCtrl.text.trim();
+    final mobile  = _ncMobileCtrl.text.trim();
+    final tests   = List<Map<String, String>>.from(_additionalCustomerTests);
+
+    final newBooking = TechnicianBooking(
+      id: 'BK${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+      customerName: name,
+      customerPhone: mobile,
+      address: widget.booking.address,   // same location as current booking
+      city: widget.booking.city,
+      pincode: widget.booking.pincode,
+      date: widget.booking.date,
+      timeSlot: widget.booking.timeSlot,
+      testNames: tests.map((t) => t['name'] ?? '').toList(),
+      mode: widget.booking.mode,
+      status: 'Confirmed',
+      serviceChargePaid: 99.0,
+      testsTotal: tests.fold(0, (s, t) => s + (double.tryParse(t['price'] ?? '0') ?? 0)),
+      assignedAt: DateTime.now(),
+    );
+
+    // Notify dashboard to add this booking
+    widget.onNewBooking?.call(newBooking);
+
+    setState(() {
+      _showNewCustomerForm = false;
+      _ncNameCtrl.clear();
+      _ncMobileCtrl.clear();
+      _ncAgeCtrl.clear();
+      _ncRelCtrl.clear();
+      _ncGender = null;
+      _additionalCustomerTests.clear();
+    });
+
+    // TODO: POST /api/bookings/additional
+    // { name, mobile, age, gender, relation, tests, booking_id, address }
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('$name added with ${tests.length} test(s) — visible in dashboard'),
+      backgroundColor: AppColors.brandGreen,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
   }
 
   @override
@@ -1324,20 +1376,8 @@ class _TechnicianBookingDetailScreenState
                       child: ElevatedButton(
                         onPressed: (_ncNameCtrl.text.trim().isNotEmpty &&
                                 _ncMobileCtrl.text.trim().length == 10)
-                            ? () {
-                                // TODO: POST /api/bookings/additional
-                                // { name, mobile, age, gender, relation, tests, booking_id, address }
-                                setState(() => _showNewCustomerForm = false);
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                  content: Text('${_ncNameCtrl.text.trim()} added for ${_additionalCustomerTests.length} test(s)'),
-                                  backgroundColor: AppColors.brandGreen,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ));
-                                _ncNameCtrl.clear(); _ncMobileCtrl.clear();
-                                _ncAgeCtrl.clear(); _ncRelCtrl.clear();
-                                _ncGender = null; _additionalCustomerTests.clear();
-                              }
+                            ? () => _saveNewCustomer()
+                              
                             : null,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.brandGreen,
