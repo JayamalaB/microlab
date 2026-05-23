@@ -3,10 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:microlab/theme/app_theme.dart';
 import 'otp_screen.dart';
 
+/// This widget is embedded directly inside [OnboardingScreen] as the bottom
+/// 65% panel. It no longer needs a [userRole] constructor argument — the role
+/// is selected inline via the two role cards.
 class LoginScreen extends StatefulWidget {
-  final String userRole; // 'customer' or 'technician'
-
-  const LoginScreen({super.key, required this.userRole});
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -15,6 +16,8 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _mobileController = TextEditingController();
   final FocusNode _mobileFocus = FocusNode();
+
+  String _selectedRole = 'customer';
   bool _isValid = false;
   bool _isLoading = false;
 
@@ -22,9 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _mobileController.addListener(_validate);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      FocusScope.of(context).requestFocus(_mobileFocus);
-    });
+    _mobileFocus.addListener(() => setState(() {}));
   }
 
   void _validate() {
@@ -39,8 +40,9 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     FocusScope.of(context).unfocus();
 
-    // TODO: Call API — POST /api/auth/send-otp { mobile: _mobileController.text }
-    await Future.delayed(const Duration(milliseconds: 800)); // mock delay
+    // TODO: Call API — POST /api/auth/send-otp
+    // { mobile: _mobileController.text, role: _selectedRole }
+    await Future.delayed(const Duration(milliseconds: 800));
 
     if (mounted) {
       setState(() => _isLoading = false);
@@ -49,7 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(
           builder: (_) => OtpScreen(
             mobile: _mobileController.text.trim(),
-            userRole: widget.userRole,
+            userRole: _selectedRole,
           ),
         ),
       );
@@ -65,137 +67,84 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isCustomer = widget.userRole == 'customer' || widget.userRole == 'vip_customer';
-
-    return Scaffold(
-      backgroundColor: AppColors.white,
-      body: SafeArea(
+    return ClipPath(
+      clipper: _UCurveClipper(),
+      child: Container(
+        color: AppColors.white,
         child: GestureDetector(
           onTap: () => FocusScope.of(context).unfocus(),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 16),
-
-                // Back button
-                GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: AppColors.divider),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.arrow_back_ios_new_rounded,
-                        size: 16, color: AppColors.textSecondary),
-                  ),
-                ),
-
-                const SizedBox(height: 28),
-
-                // Logo
-                Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: AppColors.brandGreen,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(Icons.water_drop_outlined,
-                          color: Colors.white, size: 18),
-                    ),
-                    const SizedBox(width: 10),
-                    const Text(
-                      'MicroLab',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 32),
-
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(22, 66, 22, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                // Title
                 Text(
-                  isCustomer
-                      ? 'Enter your mobile number'
+                  _selectedRole == 'customer'
+                      ? 'Enter mobile number'
                       : 'Technician login',
                   style: const TextStyle(
-                    fontSize: 22,
+                    fontSize: 20,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary,
                     letterSpacing: -0.3,
                   ),
                 ),
-
-                const SizedBox(height: 8),
-
+                const SizedBox(height: 4),
                 Text(
-                  isCustomer
+                  _selectedRole == 'customer'
                       ? "We'll send a 4-digit OTP to verify your number"
-                      : "Enter your registered technician mobile number",
+                      : 'Enter your registered technician mobile number',
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 12,
                     color: AppColors.textSecondary,
                     height: 1.5,
                   ),
                 ),
+                const SizedBox(height: 18),
 
-                const SizedBox(height: 32),
-
-                // Role badge
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppColors.brandGreenSurface,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isCustomer
-                            ? Icons.person_outline
-                            : Icons.medical_services_outlined,
-                        size: 13,
-                        color: AppColors.brandGreen,
+                // ── Role cards ────────────────────────────────────────
+                Row(
+                  children: [
+                    Expanded(
+                      child: _RoleCard(
+                        label: 'Customer',
+                        description: 'Book lab tests',
+                        icon: Icons.person_outline_rounded,
+                        selected: _selectedRole == 'customer',
+                        onTap: () =>
+                            setState(() => _selectedRole = 'customer'),
                       ),
-                      const SizedBox(width: 5),
-                      Text(
-                        isCustomer ? 'Customer' : 'Technician',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.brandGreen,
-                          fontWeight: FontWeight.w500,
-                        ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _RoleCard(
+                        label: 'Technician',
+                        description: 'Manage jobs',
+                        icon: Icons.medical_services_outlined,
+                        selected: _selectedRole == 'technician',
+                        onTap: () =>
+                            setState(() => _selectedRole = 'technician'),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 18),
 
-                const SizedBox(height: 20),
-
-                // Mobile field label
+                // ── Mobile number field ───────────────────────────────
                 const Text(
                   'Mobile number',
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 11,
                     fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimary,
+                    color: AppColors.textSecondary,
                   ),
                 ),
+                const SizedBox(height: 6),
 
-                const SizedBox(height: 8),
-
-                // Mobile input
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   decoration: BoxDecoration(
@@ -205,36 +154,35 @@ class _LoginScreenState extends State<LoginScreen> {
                           : AppColors.divider,
                       width: _mobileFocus.hasFocus ? 1.5 : 1,
                     ),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(13),
                   ),
                   child: Row(
                     children: [
                       // Country code prefix
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14),
-                        height: 52,
-                        decoration: BoxDecoration(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                        height: 46,
+                        decoration: const BoxDecoration(
                           color: AppColors.background,
-                          border: const Border(
+                          border: Border(
                             right: BorderSide(color: AppColors.divider),
                           ),
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(14),
-                            bottomLeft: Radius.circular(14),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(13),
+                            bottomLeft: Radius.circular(13),
                           ),
                         ),
                         child: const Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(
-                              '🇮🇳',
-                              style: TextStyle(fontSize: 16),
-                            ),
+                            Text('🇮🇳',
+                                style: TextStyle(fontSize: 15)),
                             Text(
                               '+91',
                               style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
                                 color: AppColors.textPrimary,
                               ),
                             ),
@@ -253,7 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             FilteringTextInputFormatter.digitsOnly,
                           ],
                           style: const TextStyle(
-                            fontSize: 15,
+                            fontSize: 14,
                             fontWeight: FontWeight.w500,
                             color: AppColors.textPrimary,
                             letterSpacing: 1.0,
@@ -262,9 +210,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             hintText: '98765 43210',
                             hintStyle: TextStyle(
                               color: AppColors.textHint,
-                              letterSpacing: 0.5,
+                              letterSpacing: 0.3,
                               fontWeight: FontWeight.w400,
-                              fontSize: 14,
+                              fontSize: 13,
                             ),
                             border: InputBorder.none,
                             contentPadding:
@@ -275,60 +223,69 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
 
-                      // Clear / tick icon
+                      // Tick / clear icon
                       if (_mobileController.text.isNotEmpty)
                         Padding(
-                          padding: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.only(right: 10),
                           child: _isValid
-                              ? const Icon(Icons.check_circle_outline,
-                                  color: AppColors.brandGreen, size: 20)
+                              ? const Icon(
+                                  Icons.check_circle_outline,
+                                  color: AppColors.brandGreen,
+                                  size: 18)
                               : GestureDetector(
-                                  onTap: () => _mobileController.clear(),
-                                  child: const Icon(Icons.cancel_outlined,
-                                      color: AppColors.textHint, size: 20),
+                                  onTap: () =>
+                                      _mobileController.clear(),
+                                  child: const Icon(
+                                      Icons.cancel_outlined,
+                                      color: AppColors.textHint,
+                                      size: 18),
                                 ),
                         ),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 8),
-
-                // Validation hint
+                // Validation error
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 200),
                   child: _mobileController.text.isNotEmpty && !_isValid
-                      ? const Row(
-                          key: ValueKey('error'),
-                          children: [
-                            Icon(Icons.info_outline,
-                                size: 12, color: Color(0xFFD32F2F)),
-                            SizedBox(width: 4),
-                            Text(
-                              'Enter a valid 10-digit mobile number',
-                              style: TextStyle(
-                                  fontSize: 12, color: Color(0xFFD32F2F)),
-                            ),
-                          ],
+                      ? const Padding(
+                          key: ValueKey('err'),
+                          padding: EdgeInsets.only(top: 5),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline,
+                                  size: 11,
+                                  color: Color(0xFFD32F2F)),
+                              SizedBox(width: 4),
+                              Text(
+                                'Enter a valid 10-digit mobile number',
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFFD32F2F)),
+                              ),
+                            ],
+                          ),
                         )
                       : const SizedBox.shrink(key: ValueKey('ok')),
                 ),
 
-                const SizedBox(height: 28),
+                const SizedBox(height: 16),
 
-                // Send OTP button
+                // ── Send OTP button ───────────────────────────────────
                 SizedBox(
                   width: double.infinity,
-                  height: 52,
+                  height: 48,
                   child: ElevatedButton(
-                    onPressed: _isValid && !_isLoading ? _sendOtp : null,
+                    onPressed:
+                        _isValid && !_isLoading ? _sendOtp : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.brandGreen,
                       disabledBackgroundColor:
-                          AppColors.brandGreen.withOpacity(0.35),
+                          AppColors.brandGreen.withOpacity(0.32),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(13),
                       ),
                     ),
                     child: _isLoading
@@ -337,39 +294,45 @@ class _LoginScreenState extends State<LoginScreen> {
                             height: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white),
                             ),
                           )
                         : const Text(
                             'Send OTP',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 15,
+                              fontSize: 14,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                    ],
+                  ),
+                ),
+              ),
 
-                // Terms
-                Center(
+              // T&C pinned to bottom
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 0, 22, 32),
+                child: Center(
                   child: RichText(
                     textAlign: TextAlign.center,
                     text: const TextSpan(
                       style: TextStyle(
-                          fontSize: 12, color: AppColors.textSecondary),
+                          fontSize: 10,
+                          color: AppColors.textSecondary),
                       children: [
-                        TextSpan(text: 'By continuing you agree to our '),
+                        TextSpan(text: 'By signing in, you accept our '),
                         TextSpan(
-                          text: 'Terms of Service',
+                          text: 'T&Cs',
                           style: TextStyle(
                               color: AppColors.brandGreen,
                               fontWeight: FontWeight.w500),
                         ),
-                        TextSpan(text: ' & '),
+                        TextSpan(text: ' and '),
                         TextSpan(
                           text: 'Privacy Policy',
                           style: TextStyle(
@@ -380,11 +343,127 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
-
-                const SizedBox(height: 40),
-              ],
-            ),
+              ),
+            ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// U-curve clip — full-width concave arc at the top of the white login panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _UCurveClipper extends CustomClipper<Path> {
+  @override
+  Path getClip(Size size) {
+    const depth = 52.0; // how far the center dips below y=0
+
+    return Path()
+      // Start top-left corner (y=0)
+      ..moveTo(0, 0)
+      // Left side stays flat, then curves down to the center
+      ..cubicTo(
+        size.width * 0.30, 0,
+        size.width * 0.30, depth,
+        size.width * 0.50, depth,
+      )
+      // Center rises back up to top-right corner (y=0)
+      ..cubicTo(
+        size.width * 0.70, depth,
+        size.width * 0.70, 0,
+        size.width, 0,
+      )
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> old) => false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Role card
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _RoleCard extends StatelessWidget {
+  final String label;
+  final String description;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _RoleCard({
+    required this.label,
+    required this.description,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.brandGreenSurface
+              : const Color(0xFFFAFAFA),
+          border: Border.all(
+            color:
+                selected ? AppColors.brandGreen : AppColors.divider,
+            width: selected ? 1.5 : 1.0,
+          ),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: selected
+                    ? AppColors.brandGreen
+                    : AppColors.brandGreenLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                size: 17,
+                color:
+                    selected ? Colors.white : AppColors.brandGreen,
+              ),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: selected
+                    ? AppColors.brandGreen
+                    : AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              description,
+              style: TextStyle(
+                fontSize: 10,
+                color: selected
+                    ? AppColors.brandGreen.withOpacity(0.7)
+                    : AppColors.textHint,
+              ),
+            ),
+          ],
         ),
       ),
     );
