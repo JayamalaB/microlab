@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 class AppColors {
   // Brand
   static const Color brandGreen = Color(0xFF0A5C4A);
+  // static const Color brandGreen = Color(0xFF3A7C36);
   static const Color brandGreenLight = Color(0xFFCBECE3);
   static const Color brandGreenSurface = Color(0xFFE8F5F1);
   static const Color brandGreenMid = Color(0xFF1D7A62);
