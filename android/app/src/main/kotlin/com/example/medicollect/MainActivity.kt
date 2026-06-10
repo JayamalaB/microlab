@@ -1,4 +1,4 @@
-package com.example.medicollect
+package com.neuralarc.microlab
 
 import io.flutter.embedding.android.FlutterActivity
 

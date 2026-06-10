@@ -1,13 +1,20 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:microlab/services/razorpay_service.dart';
 import 'package:microlab/theme/app_theme.dart';
-import 'customer_dashboard_screen.dart';
-import 'customer_home_screen.dart';
 import 'my_bookings_screen.dart';
 import 'booking_widgets.dart';
 import 'package:microlab/models.dart';
 
+// ─── Prescription doc model ───────────────────────────────────────────────────
 
+class _CheckoutDoc {
+  final Uint8List bytes;
+  final String fileName;
+  final DateTime uploadedAt;
+  _CheckoutDoc({required this.bytes, required this.fileName, required this.uploadedAt});
+}
 
 // ─── Checkout Screen ──────────────────────────────────────────────────────────
 
@@ -39,7 +46,9 @@ class CheckoutScreen extends StatefulWidget {
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
   // ── Config ────────────────────────────────────────────────
-  static const double _serviceChargeFlat = 99.0;
+  // Distance-based service charge estimated at booking time (backend calculates from pincode → lab km)
+  // TODO: replace with GET /api/service-charge?pincode=&city=
+  static const double _estimatedServiceCharge = 79.0;
 
   // ── Date ─────────────────────────────────────────────────
   DateTime? _selectedDate;
@@ -55,13 +64,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   ];
   TimeSlot? _selectedSlot;
 
-  // ── Document upload state ─────────────────────────────────
-  bool _docUploaded = false;
+  // ── Prescription / Document — multi-image upload ─────────
+  final List<_CheckoutDoc> _prescriptions = [];
+  bool _isPicking = false;
   bool _docVerified = false; // set by technician via API; mock as false
+  static const int _maxPrescrips = 5;
+  final ImagePicker _picker = ImagePicker();
 
   // ── Payment ───────────────────────────────────────────────
-  // 'service_charge' always available; 'full' only if !docRequired OR docVerified
-  String _paymentType = 'service_charge';
+  // 'full' = pay tests + service charge now via Razorpay
+  // 'pay_later' = ₹0 now, everything collected at home by technician
+  String _paymentType = 'full';
   bool _isProcessing = false;
 
   // ── VIP: selected technician ─────────────────────────────
@@ -77,20 +90,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   // ── Computed ──────────────────────────────────────────────
   double get _testsTotal => widget.cart.fold(0, (s, t) => s + t.finalPrice);
-  double get _serviceCharge => _serviceChargeFlat;
+  double get _serviceCharge => _estimatedServiceCharge;
   double get _grandTotal => _testsTotal + _serviceCharge;
 
-  // Any test in cart requiring a document
   bool get _anyDocRequired => widget.cart.any((t) => t.docRequired);
 
-  // Full payment enabled only when no doc required OR doc verified by tech
+  // Pay Full locked when a doc is required but not yet verified by technician
   bool get _fullPaymentEnabled => !_anyDocRequired || _docVerified;
 
-  double get _payableNow =>
-      _paymentType == 'service_charge' ? _serviceCharge : _grandTotal;
-
-  double get _payableLater =>
-      _paymentType == 'service_charge' ? _testsTotal : 0;
+  double get _payableNow => _paymentType == 'full' ? _grandTotal : 0;
+  double get _payableLater => _paymentType == 'full' ? 0 : _grandTotal;
 
   bool get _canProceed => _selectedDate != null && _selectedSlot != null && (!widget.isVip || _selectedTechnician != null);
 
@@ -98,6 +107,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   void initState() {
     super.initState();
+    // If any test needs a prescription, lock to Pay Later until doc is verified
+    if (_anyDocRequired) _paymentType = 'pay_later';
   }
 
   @override
@@ -135,30 +146,80 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // ── Mock prescription upload ──────────────────────────────
-  Future<void> _uploadDoc() async {
-    // TODO: image_picker → multipart POST /api/upload/prescription
-    await Future.delayed(const Duration(milliseconds: 600));
-    setState(() => _docUploaded = true);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(children: [
-            Icon(Icons.upload_file_outlined, color: Colors.white, size: 16),
-            SizedBox(width: 8),
-            Expanded(child: Text('Prescription uploaded. Awaiting technician verification.')),
-          ]),
-          backgroundColor: AppColors.brandGreen,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  // ── Prescription upload — multi-image ────────────────────
+  void _showPresSourcePicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
-      );
-    }
+        padding: EdgeInsets.fromLTRB(
+            20, 12, 20, MediaQuery.of(context).padding.bottom + 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 40, height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+                color: AppColors.divider, borderRadius: BorderRadius.circular(2)),
+          ),
+          _PresSourceTile(Icons.camera_alt_outlined, 'Camera', 'Take a photo now',
+              () { Navigator.pop(context); _pickPres(ImageSource.camera); }),
+          const SizedBox(height: 8),
+          _PresSourceTile(Icons.photo_library_outlined, 'Gallery', 'Choose from your photos',
+              () { Navigator.pop(context); _pickPres(ImageSource.gallery); }),
+          const SizedBox(height: 4),
+        ]),
+      ),
+    );
   }
 
-  // ── Open Razorpay checkout ───────────────────────────────
+  Future<void> _pickPres(ImageSource source) async {
+    if (_isPicking || _prescriptions.length >= _maxPrescrips) return;
+    setState(() => _isPicking = true);
+    try {
+      if (source == ImageSource.gallery) {
+        final images = await _picker.pickMultiImage(imageQuality: 80);
+        if (images.isNotEmpty) {
+          final toAdd = images.take(_maxPrescrips - _prescriptions.length);
+          final docs = await Future.wait(toAdd.map((f) async => _CheckoutDoc(
+              bytes: await f.readAsBytes(),
+              fileName: f.name,
+              uploadedAt: DateTime.now())));
+          setState(() => _prescriptions.addAll(docs));
+        }
+      } else {
+        final img = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+        if (img != null) {
+          final bytes = await img.readAsBytes();
+          setState(() => _prescriptions.add(_CheckoutDoc(
+              bytes: bytes, fileName: img.name, uploadedAt: DateTime.now())));
+        }
+      }
+    } catch (_) {}
+    setState(() => _isPicking = false);
+  }
+
+  void _viewPres(int index) {
+    Navigator.push(context, MaterialPageRoute(
+        builder: (_) => _PresViewerPage(images: _prescriptions, initialIndex: index)));
+  }
+
+  void _deletePres(int index) {
+    setState(() => _prescriptions.removeAt(index));
+  }
+
+  // ── Open Razorpay checkout (or confirm directly for Pay Later) ──────────
   void _proceedToPayment() {
     if (!_canProceed) return;
+
+    if (_paymentType == 'pay_later') {
+      _confirmBooking('pay_later');
+      return;
+    }
+
     setState(() => _isProcessing = true);
 
     // TODO: fetch order_id from your backend first
@@ -429,31 +490,55 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
           const SizedBox(height: 14),
 
-          // ── Document Upload (if any test requires it) ─────
-          if (_anyDocRequired)
+          // ── Prescription / Document (multi-image) ─────────
+          // Required when any test needs it; also always shown for VIP
+          if (_anyDocRequired || widget.isVip)
             _SectionCard(
               title: 'Prescription / Document',
               icon: Icons.description_outlined,
-              required: true,
+              required: _anyDocRequired,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Info banner
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFFF3E0),
+                      color: _anyDocRequired
+                          ? const Color(0xFFFFF3E0)
+                          : AppColors.brandGreenSurface,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFFFCC02).withOpacity(0.4)),
+                      border: Border.all(
+                        color: _anyDocRequired
+                            ? const Color(0xFFFFCC02).withValues(alpha: 0.4)
+                            : AppColors.brandGreenLight,
+                      ),
                     ),
-                    child: const Row(
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.info_outline_rounded, size: 14, color: Color(0xFFE65100)),
-                        SizedBox(width: 8),
+                        Icon(
+                          _anyDocRequired
+                              ? Icons.info_outline_rounded
+                              : Icons.upload_file_outlined,
+                          size: 14,
+                          color: _anyDocRequired
+                              ? const Color(0xFFE65100)
+                              : AppColors.brandGreen,
+                        ),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'One or more tests require a doctor\'s prescription. Upload it here. Full payment will be available after the technician verifies your document.',
-                            style: TextStyle(fontSize: 12, color: Color(0xFF795548), height: 1.4),
+                            _anyDocRequired
+                                ? 'One or more tests require a prescription. Upload up to $_maxPrescrips images. Full payment unlocks after technician verification.'
+                                : 'Upload your prescription or any relevant documents (optional). Up to $_maxPrescrips images.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.4,
+                              color: _anyDocRequired
+                                  ? const Color(0xFF795548)
+                                  : AppColors.brandGreen,
+                            ),
                           ),
                         ),
                       ],
@@ -461,50 +546,120 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  if (!_docUploaded)
+                  // Thumbnail grid
+                  if (_prescriptions.isNotEmpty) ...[
                     SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _uploadDoc,
-                        icon: const Icon(Icons.upload_file_outlined, size: 18),
-                        label: const Text('Upload Prescription'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.brandGreen,
-                          side: const BorderSide(color: AppColors.brandGreen, width: 1.5),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      height: 104,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _prescriptions.length +
+                            (_prescriptions.length < _maxPrescrips ? 1 : 0),
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (_, i) {
+                          if (i == _prescriptions.length) {
+                            return _PresAddMoreTile(
+                              onTap: _isPicking ? null : _showPresSourcePicker,
+                            );
+                          }
+                          return _PresThumbnailCard(
+                            doc: _prescriptions[i],
+                            onView: () => _viewPres(i),
+                            onDelete: () => _deletePres(i),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_prescriptions.length} of $_maxPrescrips image${_prescriptions.length == 1 ? '' : 's'} uploaded',
+                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+
+                  // Empty upload tile
+                  if (_prescriptions.isEmpty)
+                    GestureDetector(
+                      onTap: _isPicking ? null : _showPresSourcePicker,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        decoration: BoxDecoration(
+                          color: AppColors.background,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _anyDocRequired
+                                ? AppColors.brandGreen
+                                : AppColors.divider,
+                            width: _anyDocRequired ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _isPicking
+                                ? const SizedBox(
+                                    width: 24, height: 24,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppColors.brandGreen))
+                                : const Icon(Icons.upload_file_outlined,
+                                    size: 28, color: AppColors.brandGreen),
+                            const SizedBox(height: 8),
+                            Text(
+                              _isPicking ? 'Picking…' : 'Tap to upload prescription',
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.brandGreen),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Up to $_maxPrescrips images · JPG or PNG',
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppColors.textHint),
+                            ),
+                          ],
                         ),
                       ),
                     ),
 
-                  if (_docUploaded && !_docVerified)
+                  // Verification status
+                  if (_prescriptions.isNotEmpty && !_docVerified) ...[
+                    const SizedBox(height: 10),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         color: AppColors.brandGreenSurface,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: AppColors.brandGreenLight),
                       ),
                       child: const Row(children: [
-                        Icon(Icons.check_circle_outline, size: 16, color: AppColors.brandGreen),
+                        Icon(Icons.hourglass_top_rounded, size: 14, color: AppColors.brandGreen),
                         SizedBox(width: 8),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('Prescription uploaded',
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.brandGreen)),
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.brandGreen)),
                               Text('Awaiting technician verification',
-                                  style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.textSecondary)),
                             ],
                           ),
                         ),
                       ]),
                     ),
-
-                  if (_docVerified)
+                  ],
+                  if (_docVerified) ...[
+                    const SizedBox(height: 10),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         color: AppColors.brandGreenSurface,
                         borderRadius: BorderRadius.circular(10),
@@ -514,9 +669,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         Icon(Icons.verified_outlined, size: 16, color: AppColors.brandGreen),
                         SizedBox(width: 8),
                         Expanded(child: Text('Document verified by technician',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.brandGreen))),
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.brandGreen))),
                       ]),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -529,32 +688,57 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             icon: Icons.payment_outlined,
             required: true,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Option 1: Service charge only (always available)
-                _PaymentOptionTile(
-                  selected: _paymentType == 'service_charge',
-                  title: 'Pay Service Charge Now',
-                  subtitle: 'Pay ₹${_serviceCharge.toInt()} now to confirm booking · Remaining ₹${_testsTotal.toInt()} collected at home',
-                  amount: '₹${_serviceCharge.toInt()} now',
-                  badge: 'RECOMMENDED',
-                  badgeColor: AppColors.brandGreen,
-                  enabled: true,
-                  onTap: () => setState(() => _paymentType = 'service_charge'),
+                // Service charge info banner
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: AppColors.brandGreenSurface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.brandGreenLight),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.directions_car_outlined, size: 14, color: AppColors.brandGreen),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Service charge of ₹${_serviceCharge.toInt()} is estimated based on travel distance. Final amount is confirmed when the technician starts the journey.',
+                          style: const TextStyle(fontSize: 12, color: AppColors.brandGreen, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 10),
 
-                // Option 2: Full amount (locked if doc required & not verified)
+                // Option 1: Pay Full Amount Now
                 _PaymentOptionTile(
                   selected: _paymentType == 'full',
                   title: 'Pay Full Amount Now',
                   subtitle: _fullPaymentEnabled
-                      ? 'Pay complete ₹${_grandTotal.toInt()} (tests + service charge) · Nothing due later'
+                      ? 'Pay ₹${_grandTotal.toInt()} (tests + service charge) · Nothing due at collection'
                       : 'Available after technician verifies your prescription',
                   amount: '₹${_grandTotal.toInt()} now',
-                  badge: _fullPaymentEnabled ? 'SAVE TIME' : 'LOCKED',
-                  badgeColor: _fullPaymentEnabled ? const Color(0xFF1565C0) : AppColors.textHint,
+                  badge: _fullPaymentEnabled ? 'RECOMMENDED' : 'LOCKED',
+                  badgeColor: _fullPaymentEnabled ? AppColors.brandGreen : AppColors.textHint,
                   enabled: _fullPaymentEnabled,
                   onTap: _fullPaymentEnabled ? () => setState(() => _paymentType = 'full') : null,
+                ),
+                const SizedBox(height: 10),
+
+                // Option 2: Pay Later
+                _PaymentOptionTile(
+                  selected: _paymentType == 'pay_later',
+                  title: 'Pay Later',
+                  subtitle: 'Pay ₹${_grandTotal.toInt()} at the time of collection · No payment needed now',
+                  amount: '₹0 now',
+                  badge: 'FLEXIBLE',
+                  badgeColor: AppColors.blue,
+                  enabled: true,
+                  onTap: () => setState(() => _paymentType = 'pay_later'),
                 ),
               ],
             ),
@@ -606,13 +790,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             child: Column(
               children: [
                 _BillRow('Tests Total', '₹${_testsTotal.toInt()}'),
-                _BillRow('Service Charge', '+ ₹${_serviceCharge.toInt()}', sub: true),
+                _BillRow('Service Charge (est.)', '+ ₹${_serviceCharge.toInt()}', sub: true),
                 const Divider(height: 20),
                 _BillRow('Grand Total', '₹${_grandTotal.toInt()}', bold: true),
                 const SizedBox(height: 8),
                 _BillRow('Pay Now', '₹${_payableNow.toInt()}', bold: true, green: true),
-                if (_paymentType == 'service_charge')
-                  _BillRow('Pay at Collection', '₹${_payableLater.toInt()}', sub: true),
+                if (_paymentType == 'pay_later')
+                  _BillRow('Due at Collection', '₹${_payableLater.toInt()}', sub: true),
               ],
             ),
           ),
@@ -650,8 +834,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               child: ElevatedButton(
                 onPressed: _canProceed && !_isProcessing ? _proceedToPayment : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.brandGreen,
-                  disabledBackgroundColor: AppColors.brandGreen.withOpacity(0.35),
+                  backgroundColor: _paymentType == 'pay_later'
+                      ? AppColors.brandGreen
+                      : const Color(0xFF1565C0),
+                  disabledBackgroundColor: (_paymentType == 'pay_later'
+                      ? AppColors.brandGreen
+                      : const Color(0xFF1565C0)).withValues(alpha: 0.35),
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
@@ -659,7 +847,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     ? const SizedBox(width: 20, height: 20,
                         child: CircularProgressIndicator(strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
-                    : Text('Pay ₹${_payableNow.toInt()} via Razorpay',
+                    : Text(
+                        _paymentType == 'pay_later'
+                            ? 'Confirm Booking · Pay Later'
+                            : 'Pay ₹${_payableNow.toInt()} via Razorpay',
                         style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500)),
               ),
             ),
@@ -1011,10 +1202,11 @@ class BookingConfirmationScreen extends StatelessWidget {
                         _ConfirmRow(Icons.calculate_outlined, 'Grand Total', '₹${booking.grandTotal.toInt()}'),
                         const Divider(height: 16),
                         _ConfirmRow(Icons.check_circle_outline, 'Paid Now',
-                            '₹${booking.paidAmount.toInt()}', valueColor: AppColors.brandGreen),
-                        if (booking.paymentType == 'service_charge')
+                            booking.paymentType == 'pay_later' ? '₹0' : '₹${booking.paidAmount.toInt()}',
+                            valueColor: AppColors.brandGreen),
+                        if (booking.paymentType == 'pay_later')
                           _ConfirmRow(Icons.schedule_outlined, 'Due at Collection',
-                              '₹${(booking.grandTotal - booking.paidAmount).toInt()}',
+                              '₹${booking.grandTotal.toInt()} (tests + service charge)',
                               valueColor: const Color(0xFFE65100)),
                       ],
                     ),
@@ -1220,5 +1412,211 @@ class _NextStep extends StatelessWidget {
                 style: const TextStyle(fontSize: 12, color: AppColors.brandGreen, height: 1.4))),
           ],
         ),
+      );
+}
+
+// ─── Prescription upload widgets ──────────────────────────────────────────────
+
+class _PresThumbnailCard extends StatelessWidget {
+  final _CheckoutDoc doc;
+  final VoidCallback onView;
+  final VoidCallback onDelete;
+  const _PresThumbnailCard({
+    required this.doc,
+    required this.onView,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onView,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.divider),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.memory(doc.bytes, fit: BoxFit.cover),
+            ),
+          ),
+          Positioned(
+            top: -6, right: -6,
+            child: GestureDetector(
+              onTap: onDelete,
+              child: Container(
+                width: 22, height: 22,
+                decoration: const BoxDecoration(
+                    color: Color(0xFFD32F2F), shape: BoxShape.circle),
+                child: const Icon(Icons.close_rounded, size: 13, color: Colors.white),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 6, right: 6,
+            child: Container(
+              width: 24, height: 24,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.fullscreen_rounded, size: 14, color: Colors.white),
+            ),
+          ),
+        ]),
+      );
+}
+
+class _PresAddMoreTile extends StatelessWidget {
+  final VoidCallback? onTap;
+  const _PresAddMoreTile({this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 96, height: 96,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.brandGreenLight, width: 1.5),
+            color: AppColors.brandGreenSurface,
+          ),
+          child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.add_photo_alternate_outlined, size: 26, color: AppColors.brandGreen),
+            SizedBox(height: 4),
+            Text('Add more',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: AppColors.brandGreen,
+                    fontWeight: FontWeight.w500)),
+          ]),
+        ),
+      );
+}
+
+class _PresSourceTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _PresSourceTile(this.icon, this.title, this.subtitle, this.onTap);
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Row(children: [
+            Container(
+              width: 40, height: 40,
+              decoration: const BoxDecoration(
+                  color: AppColors.brandGreenSurface, shape: BoxShape.circle),
+              child: Icon(icon, size: 20, color: AppColors.brandGreen),
+            ),
+            const SizedBox(width: 14),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              Text(subtitle,
+                  style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            ]),
+            const Spacer(),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
+          ]),
+        ),
+      );
+}
+
+// ─── Full-screen prescription viewer ─────────────────────────────────────────
+
+class _PresViewerPage extends StatefulWidget {
+  final List<_CheckoutDoc> images;
+  final int initialIndex;
+  const _PresViewerPage({required this.images, required this.initialIndex});
+
+  @override
+  State<_PresViewerPage> createState() => _PresViewerPageState();
+}
+
+class _PresViewerPageState extends State<_PresViewerPage> {
+  late final PageController _pageCtrl;
+  late int _current;
+
+  @override
+  void initState() {
+    super.initState();
+    _current = widget.initialIndex;
+    _pageCtrl = PageController(initialPage: _current);
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          iconTheme: const IconThemeData(color: Colors.white),
+          title: Text(
+            '${_current + 1} / ${widget.images.length}',
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Text(
+                  widget.images[_current].fileName,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+        ),
+        body: Column(children: [
+          Expanded(
+            child: PageView.builder(
+              controller: _pageCtrl,
+              itemCount: widget.images.length,
+              onPageChanged: (i) => setState(() => _current = i),
+              itemBuilder: (_, i) => InteractiveViewer(
+                maxScale: 5.0,
+                child: Center(
+                  child: Image.memory(widget.images[i].bytes, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+          ),
+          if (widget.images.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 24, top: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(widget.images.length, (i) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: _current == i ? 16 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: _current == i ? Colors.white : Colors.white38,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                )),
+              ),
+            ),
+        ]),
       );
 }

@@ -6,7 +6,8 @@ import 'package:microlab/models.dart';
 
 class MyBookingsScreen extends StatefulWidget {
   final BookingModel? initialBooking;
-  const MyBookingsScreen({super.key, this.initialBooking});
+  final bool embedded;
+  const MyBookingsScreen({super.key, this.initialBooking, this.embedded = false});
 
   @override
   State<MyBookingsScreen> createState() => _MyBookingsScreenState();
@@ -105,6 +106,62 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (widget.embedded) {
+      return Column(
+        children: [
+          Container(
+            color: AppColors.brandGreen,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 14, 16, 8),
+                  child: const Text('My Bookings',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600)),
+                ),
+                TabBar(
+                  controller: _tabController,
+                  indicatorColor: Colors.white,
+                  indicatorWeight: 3,
+                  labelColor: Colors.white,
+                  unselectedLabelColor: Colors.white60,
+                  labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  unselectedLabelStyle:
+                      const TextStyle(fontSize: 13, fontWeight: FontWeight.w400),
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
+                  tabs: _tabs.map((t) => Tab(text: t)).toList(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ColoredBox(
+              color: const Color(0xFFF4F6F8),
+              child: TabBarView(
+                controller: _tabController,
+                children: _tabs.map((tab) {
+                  final list = _filtered(tab);
+                  if (list.isEmpty) return _emptyState(tab);
+                  return ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    itemCount: list.length,
+                    itemBuilder: (_, i) => _BookingCard(
+                      booking: list[i],
+                      onTap: () => _showBookingDetail(list[i]),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F8),
       appBar: AppBar(

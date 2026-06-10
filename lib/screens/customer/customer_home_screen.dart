@@ -1,12 +1,13 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:microlab/theme/app_theme.dart';
 import 'add_member_screen.dart';
 import 'my_bookings_screen.dart';
 import 'customer_dashboard_screen.dart';
 import 'package:microlab/models.dart';
 import 'reports_screen.dart';
-import 'reports_screen.dart';
+import 'profile_screen.dart';
+import 'support_chatbot.dart';
 
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -22,9 +23,11 @@ class CustomerHomeScreen extends StatefulWidget {
 
 class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  int _selectedIndex = 0;
+  MemberModel? _activeMember;
 
   // TODO: Replace with GET /api/customer/members
-  List<MemberModel> _members = [
+  final List<MemberModel> _members = [
     MemberModel(
       id: '1',
       name: 'Ravi Kumar',
@@ -112,61 +115,165 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
     );
   }
 
+  void _onNavTap(int index) => setState(() {
+    _selectedIndex = index;
+    if (index != 0) _activeMember = null;
+  });
+
+  bool get _inDashboard => _selectedIndex == 0 && _activeMember != null;
+  int get _stackIndex => _selectedIndex == 0
+      ? (_activeMember != null ? 1 : 0)
+      : _selectedIndex + 1;
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: (!_inDashboard && _selectedIndex == 0)
+          ? SystemUiOverlayStyle.dark.copyWith(statusBarColor: Colors.transparent)
+          : SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
+      child: PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_activeMember != null) setState(() => _activeMember = null);
+      },
+      child: Scaffold(
       key: _scaffoldKey,
       backgroundColor: AppColors.background,
-      drawer: _AppDrawer(mobile: widget.mobile, isVip: widget.isVip),
-      appBar: AppBar(
-        backgroundColor: AppColors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.menu_rounded,
-              color: AppColors.textPrimary, size: 24),
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-        ),
-        title: Row(
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: AppColors.brandGreen,
-                borderRadius: BorderRadius.circular(8),
+      appBar: (!_inDashboard && _selectedIndex == 0)
+          ? AppBar(
+              backgroundColor: AppColors.white,
+              elevation: 0,
+              scrolledUnderElevation: 0,
+              automaticallyImplyLeading: false,
+              title: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: AppColors.brandGreen,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.water_drop_outlined,
+                        color: Colors.white, size: 14),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'MicroLab',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary),
+                  ),
+                ],
               ),
-              child: const Icon(Icons.water_drop_outlined,
-                  color: Colors.white, size: 14),
-            ),
-            const SizedBox(width: 8),
-            const Text('MicroLab',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined,
-                color: AppColors.textSecondary, size: 22),
-            onPressed: () {},
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.notifications_outlined,
+                      color: AppColors.textSecondary, size: 22),
+                  onPressed: () {},
+                ),
+              ],
+            )
+          : null,
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: _stackIndex,
+            children: [
+              _members.isEmpty ? _emptyState() : _memberList(),
+              // Slot 1: embedded dashboard
+              if (_activeMember != null)
+                SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: CustomerDashboardScreen(
+                    key: ValueKey(_activeMember!.id),
+                    member: _activeMember!,
+                    isVip: widget.isVip,
+                    embedded: true,
+                    onBack: () => setState(() => _activeMember = null),
+                  ),
+                )
+              else
+                const SizedBox.shrink(),
+              const SafeArea(top: false, bottom: false, child: MyBookingsScreen(embedded: true)),
+              const SafeArea(top: false, bottom: false, child: ReportsScreen(embedded: true)),
+              // Slot 4: profile
+              SafeArea(
+                top: false,
+                bottom: false,
+                child: ProfileScreen(
+                  mobile: widget.mobile,
+                  isVip: widget.isVip,
+                  members: _members,
+                  embedded: true,
+                  onAddMember: _openAddMember,
+                  onEditMember: _openEditMember,
+                  onLogout: () => Navigator.of(context).popUntil((r) => r.isFirst),
+                ),
+              ),
+            ],
+          ),
+          // Chatbot FAB — always visible, positioned well above the FAB / bottom-nav zone
+          const Positioned(
+            right: 16,
+            bottom: 88,
+            child: SupportChatbotButton(),
           ),
         ],
       ),
-      body: _members.isEmpty ? _emptyState() : _memberList(),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openAddMember,
-        backgroundColor: AppColors.brandGreen,
-        foregroundColor: Colors.white,
-        elevation: 2,
-        icon: const Icon(Icons.person_add_outlined, size: 20),
-        label: const Text('Add Customer',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+      floatingActionButton: (!_inDashboard && _selectedIndex == 0)
+          ? FloatingActionButton.extended(
+              onPressed: _openAddMember,
+              backgroundColor: AppColors.brandGreen,
+              foregroundColor: Colors.white,
+              elevation: 2,
+              icon: const Icon(Icons.person_add_outlined, size: 20),
+              label: const Text('Add Customer',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+            )
+          : null,
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: _onNavTap,
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: AppColors.brandGreen,
+        unselectedItemColor: AppColors.textSecondary,
+        backgroundColor: Colors.white,
+        selectedLabelStyle:
+            const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: const TextStyle(fontSize: 11),
+        elevation: 8,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.group_outlined),
+            activeIcon: Icon(Icons.group),
+            label: 'Customers',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_month_outlined),
+            activeIcon: Icon(Icons.calendar_month),
+            label: 'Bookings',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.receipt_long_outlined),
+            activeIcon: Icon(Icons.receipt_long),
+            label: 'Reports',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline_rounded),
+            activeIcon: Icon(Icons.person_rounded),
+            label: 'Profile',
+          ),
+        ],
       ),
-    );
+    ), // Scaffold
+    ), // PopScope
+    ); // AnnotatedRegion
   }
+
 
   Widget _emptyState() {
     return Center(
@@ -237,14 +344,7 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               onView: () => _viewMember(m),
               onEdit: () => _openEditMember(m),
               onDelete: () => _confirmDelete(m.id, m.name),
-              onBook: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CustomerDashboardScreen(member: m, isVip: widget.isVip),
-                  ),
-                );
-              },
+              onBook: () => setState(() => _activeMember = m),
             )),
       ],
     );
@@ -276,10 +376,10 @@ class _MemberAvatar extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: avatarColor.withOpacity(0.1),
+        color: avatarColor.withValues(alpha: 0.1),
         shape: BoxShape.circle,
         border: hasPhoto
-            ? Border.all(color: avatarColor.withOpacity(0.3), width: 1.5)
+            ? Border.all(color: avatarColor.withValues(alpha: 0.3), width: 1.5)
             : null,
       ),
       child: ClipOval(
@@ -707,169 +807,4 @@ class _DetailRow extends StatelessWidget {
   }
 }
 
-// ─── Sidebar Drawer ───────────────────────────────────────────────────────────
 
-class _AppDrawer extends StatelessWidget {
-  final String mobile;
-  final bool isVip;
-  const _AppDrawer({required this.mobile, this.isVip = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Drawer(
-      backgroundColor: AppColors.white,
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-              color: AppColors.brandGreen,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.person_outline,
-                        color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Text('My Account',
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white)),
-                      if (isVip) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFB300),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.star_rounded, size: 10, color: Colors.white),
-                              SizedBox(width: 3),
-                              Text('VIP',
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white,
-                                      letterSpacing: 0.5)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text('+91 $mobile',
-                      style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.white.withOpacity(0.8))),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            _DrawerItem(
-              icon: Icons.group_outlined,
-              label: 'My Customers',
-              isActive: true,
-              onTap: () => Navigator.pop(context),
-            ),
-            _DrawerItem(
-              icon: Icons.calendar_month_outlined,
-              label: 'My Bookings',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => const MyBookingsScreen()));
-              },
-            ),
-            _DrawerItem(
-              icon: Icons.receipt_long_outlined,
-              label: 'Reports & Results',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsScreen()));
-              },
-            ),
-            _DrawerItem(
-              icon: Icons.help_outline_rounded,
-              label: 'Help & Support',
-              onTap: () => Navigator.pop(context),
-            ),
-            _DrawerItem(
-              icon: Icons.info_outline_rounded,
-              label: 'About Us',
-              onTap: () => Navigator.pop(context),
-            ),
-            const Spacer(),
-            const Divider(height: 1),
-            _DrawerItem(
-              icon: Icons.logout_rounded,
-              label: 'Logout',
-              isDestructive: true,
-              onTap: () {
-                Navigator.pop(context);
-                // TODO: clear session, go to onboarding
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DrawerItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool isActive;
-  final bool isDestructive;
-
-  const _DrawerItem({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.isActive = false,
-    this.isDestructive = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isDestructive
-        ? const Color(0xFFD32F2F)
-        : isActive
-            ? AppColors.brandGreen
-            : AppColors.textSecondary;
-
-    return ListTile(
-      leading: Icon(icon, size: 20, color: color),
-      title: Text(label,
-          style: TextStyle(
-              fontSize: 14,
-              fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-              color: color)),
-      tileColor: isActive ? AppColors.brandGreenSurface : null,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-      visualDensity: VisualDensity.compact,
-      onTap: onTap,
-    );
-  }
-}

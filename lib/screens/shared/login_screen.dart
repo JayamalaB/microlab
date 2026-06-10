@@ -114,9 +114,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         label: 'Customer',
                         description: 'Book lab tests',
                         icon: Icons.person_outline_rounded,
-                        selected: _selectedRole == 'customer',
+                        selected: _selectedRole == 'vip_customer',
                         onTap: () =>
-                            setState(() => _selectedRole = 'customer'),
+                            setState(() => _selectedRole = 'vip_customer'),
                       ),
                     ),
                     const SizedBox(width: 10),

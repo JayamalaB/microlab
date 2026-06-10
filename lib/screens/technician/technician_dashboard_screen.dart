@@ -2,9 +2,11 @@ import 'dart:async';
 import 'technician_booking_detail_screen.dart';
 import 'technician_history_screen.dart';
 import 'technician_slot_screen.dart';
+import 'technician_profile_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:microlab/theme/app_theme.dart';
-import 'package:microlab/models.dart';
+import 'package:microlab/screens/customer/support_chatbot.dart';
 
 // ─── Technician Booking Model ─────────────────────────────────────────────────
 
@@ -59,9 +61,9 @@ class TechnicianDashboardScreen extends StatefulWidget {
       _TechnicianDashboardScreenState();
 }
 
-class _TechnicianDashboardScreenState extends State<TechnicianDashboardScreen>
- {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+class _TechnicianDashboardScreenState extends State<TechnicianDashboardScreen> {
+  int _selectedIndex = 0;
+
   // Mock bookings — replace with GET /api/technician/bookings
   late List<TechnicianBooking> _bookings;
 
@@ -164,7 +166,7 @@ class _TechnicianDashboardScreenState extends State<TechnicianDashboardScreen>
           });
           Navigator.pop(context);
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Booking confirmed and added to your schedule'),
+            content: const Text('Booking confirmed and added to your schedule'),
             backgroundColor: AppColors.brandGreen,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -179,11 +181,6 @@ class _TechnicianDashboardScreenState extends State<TechnicianDashboardScreen>
       .where((b) => !['Completed','Cancelled'].contains(b.status))
       .toList()
     ..sort((a, b) => a.date.compareTo(b.date));
-
-  List<TechnicianBooking> get _completed => _bookings
-      .where((b) => b.status == 'Completed' || b.status == 'Cancelled')
-      .toList()
-    ..sort((a, b) => b.date.compareTo(a.date));
 
   void _callCustomer(String phone) {
     // TODO: url_launcher → launch('tel:+91$phone')
@@ -273,6 +270,8 @@ class _TechnicianDashboardScreenState extends State<TechnicianDashboardScreen>
     );
   }
 
+  void _onNavTap(int index) => setState(() => _selectedIndex = index);
+
   @override
   void dispose() {
     _newRequestTimer?.cancel();
@@ -281,54 +280,117 @@ class _TechnicianDashboardScreenState extends State<TechnicianDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: const Color(0xFFF4F6F8),
-      drawer: _TechnicianDrawer(mobile: widget.mobile),
-      appBar: AppBar(
-        backgroundColor: AppColors.brandGreen,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 24),
-          onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-        ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('MicroLab',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600)),
-            Text('Technician · +91 ${widget.mobile}',
-                style: TextStyle(
-                    color: Colors.white.withOpacity(0.75), fontSize: 11)),
-          ],
-        ),
-        actions: const [],
-
-      ),
-      body: _pending.isEmpty
-          ? _emptyState('No pending bookings', Icons.calendar_today_outlined)
-          : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              itemCount: _pending.length,
-              itemBuilder: (_, i) => _PendingBookingCard(
-                booking: _pending[i],
-                onCall: () => _callCustomer(_pending[i].customerPhone),
-                onStartCollection: () => _markInProgress(_pending[i]),
-                onComplete: () => _markCompleted(_pending[i]),
-                onManage: () => Navigator.push(context, MaterialPageRoute(
-                  builder: (_) => TechnicianBookingDetailScreen(
-                    booking: _pending[i],
-                    onNewBooking: (newBooking) {
-                      setState(() => _bookings.insert(0, newBooking));
-                    },
-                  ))),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
+      child: Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: _selectedIndex == 0
+          ? AppBar(
+              backgroundColor: AppColors.brandGreen,
+              elevation: 0,
+              automaticallyImplyLeading: false,
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('MicroLab',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600)),
+                  Text('Technician · +91 ${widget.mobile}',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.75), fontSize: 11)),
+                ],
               ),
-            ),
-    );
+              actions: const [],
+            )
+          : null,
+      body: Stack(
+        children: [
+          IndexedStack(
+            index: _selectedIndex,
+            children: [
+              _pending.isEmpty
+                  ? _emptyState('No pending bookings', Icons.calendar_today_outlined)
+                  : ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                      itemCount: _pending.length,
+                      itemBuilder: (_, i) => _PendingBookingCard(
+                        booking: _pending[i],
+                        onCall: () => _callCustomer(_pending[i].customerPhone),
+                        onStartCollection: () => _markInProgress(_pending[i]),
+                        onComplete: () => _markCompleted(_pending[i]),
+                        onManage: () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => TechnicianBookingDetailScreen(
+                            booking: _pending[i],
+                            onNewBooking: (newBooking) {
+                              setState(() => _bookings.insert(0, newBooking));
+                            },
+                          ))),
+                      ),
+                    ),
+              SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: TechnicianSlotScreen(embedded: true, mobile: widget.mobile)),
+              SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: TechnicianHistoryScreen(embedded: true, mobile: widget.mobile)),
+              SafeArea(
+                  top: false,
+                  bottom: false,
+                  child: TechnicianProfileScreen(
+                    embedded: true,
+                    mobile: widget.mobile,
+                    onLogout: () => Navigator.of(context).popUntil((r) => r.isFirst),
+                  )),
+            ],
+          ),
+          const Positioned(
+            right: 16,
+            bottom: 88,
+            child: SupportChatbotButton(),
+          ),
+        ],
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        onTap: _onNavTap,
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: AppColors.brandGreen,
+        unselectedItemColor: AppColors.textSecondary,
+        backgroundColor: Colors.white,
+        selectedLabelStyle:
+            const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        unselectedLabelStyle: const TextStyle(fontSize: 11),
+        elevation: 8,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.dashboard_outlined),
+            activeIcon: Icon(Icons.dashboard),
+            label: 'Home',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_month_outlined),
+            activeIcon: Icon(Icons.calendar_month),
+            label: 'Schedule',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.history_outlined),
+            activeIcon: Icon(Icons.history),
+            label: 'History',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline_rounded),
+            activeIcon: Icon(Icons.person_rounded),
+            label: 'Profile',
+          ),
+        ],
+      ),
+    ), // Scaffold
+    ); // AnnotatedRegion
   }
 
   Widget _emptyState(String msg, IconData icon) => Center(
@@ -408,7 +470,7 @@ class _PendingBookingCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: booking.status == 'In Progress'
-              ? const Color(0xFF1565C0).withOpacity(0.4)
+              ? const Color(0xFF1565C0).withValues(alpha: 0.4)
               : AppColors.divider,
           width: booking.status == 'In Progress' ? 1.5 : 1,
         ),
@@ -420,7 +482,7 @@ class _PendingBookingCard extends StatelessWidget {
             // Status strip
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              color: _statusColor.withOpacity(0.08),
+              color: _statusColor.withValues(alpha: 0.08),
               child: Row(
                 children: [
                   Icon(_statusIcon, size: 13, color: _statusColor),
@@ -513,11 +575,11 @@ class _PendingBookingCard extends StatelessWidget {
 
                   if (booking.docRequired) ...[
                     const SizedBox(height: 5),
-                    Row(children: [
-                      const Icon(Icons.description_outlined,
+                    const Row(children: [
+                      Icon(Icons.description_outlined,
                           size: 13, color: Color(0xFFE65100)),
-                      const SizedBox(width: 6),
-                      const Text('Prescription required',
+                      SizedBox(width: 6),
+                      Text('Prescription required',
                           style: TextStyle(
                               fontSize: 12,
                               color: Color(0xFFE65100),
@@ -574,129 +636,6 @@ class _PendingBookingCard extends StatelessWidget {
   }
 }
 
-// ─── Completed Booking Card (read-only) ───────────────────────────────────────
-
-class _CompletedBookingCard extends StatelessWidget {
-  final TechnicianBooking booking;
-  const _CompletedBookingCard({required this.booking});
-
-  String _formatDate(DateTime d) {
-    const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-    return '${days[d.weekday - 1]}, ${d.day} ${months[d.month]} ${d.year}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9F9F9), // slightly muted — read-only
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(13),
-        child: Column(
-          children: [
-            // Completed strip
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              color: booking.status == 'Cancelled'
-                  ? const Color(0xFFFFEBEE)
-                  : AppColors.brandGreenSurface,
-              child: Row(
-                children: [
-                  Icon(
-                    booking.status == 'Cancelled'
-                        ? Icons.cancel_outlined
-                        : Icons.check_circle_outline,
-                    size: 13,
-                    color: booking.status == 'Cancelled'
-                        ? const Color(0xFFD32F2F)
-                        : AppColors.brandGreen,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(booking.status,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: booking.status == 'Cancelled'
-                              ? const Color(0xFFD32F2F)
-                              : AppColors.brandGreen)),
-                  const Spacer(),
-                  Text(booking.id,
-                      style: const TextStyle(
-                          fontSize: 11, color: AppColors.textHint)),
-                ],
-              ),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(booking.customerName,
-                                  style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.textSecondary)),
-                            ),
-                            if (booking.isVip)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFFB300).withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Text('VIP',
-                                    style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFFFFB300))),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(_formatDate(booking.date),
-                            style: const TextStyle(
-                                fontSize: 12, color: AppColors.textHint)),
-                        const SizedBox(height: 2),
-                        Text(booking.testNames.join(', '),
-                            style: const TextStyle(
-                                fontSize: 12, color: AppColors.textHint),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1),
-                      ],
-                    ),
-                  ),
-                  // Read-only lock icon
-                  Container(
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(
-                      color: AppColors.divider.withOpacity(0.5),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.lock_outline_rounded,
-                        size: 16, color: AppColors.textHint),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 // ─── New Request Dialog ───────────────────────────────────────────────────────
 
@@ -737,16 +676,16 @@ class _NewRequestDialog extends StatelessWidget {
           // Header — pulsing green + call button
           Container(
             padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: AppColors.brandGreen,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             child: Row(
               children: [
                 Container(
                   width: 36, height: 36,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(Icons.notification_important_outlined,
@@ -778,7 +717,7 @@ class _NewRequestDialog extends StatelessWidget {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Colors.black.withValues(alpha: 0.1),
                           blurRadius: 6,
                         ),
                       ],
@@ -853,7 +792,7 @@ class _NewRequestDialog extends StatelessWidget {
                       color: const Color(0xFFFFF3E0),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                          color: const Color(0xFFFFCC02).withOpacity(0.4)),
+                          color: const Color(0xFFFFCC02).withValues(alpha: 0.4)),
                     ),
                     child: const Row(children: [
                       Icon(Icons.description_outlined,
@@ -963,109 +902,3 @@ class _InfoRow extends StatelessWidget {
       );
 }
 
-// ─── Technician Sidebar ───────────────────────────────────────────────────────
-
-class _TechnicianDrawer extends StatelessWidget {
-  final String mobile;
-  const _TechnicianDrawer({required this.mobile});
-
-  @override
-  Widget build(BuildContext context) {
-    return Drawer(
-      backgroundColor: AppColors.white,
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-              color: AppColors.brandGreen,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 56, height: 56,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.medical_services_outlined,
-                        color: Colors.white, size: 28),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text('Technician',
-                      style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white)),
-                  const SizedBox(height: 2),
-                  Text('+91 $mobile',
-                      style: TextStyle(
-                          fontSize: 13,
-                          color: Colors.white.withOpacity(0.8))),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            _DrawerItem(icon: Icons.dashboard_outlined, label: 'Dashboard', isActive: true, onTap: () => Navigator.pop(context)),
-            _DrawerItem(icon: Icons.calendar_month_outlined, label: 'My Schedule', onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(
-                builder: (_) => TechnicianSlotScreen(mobile: mobile)));
-            }),
-            _DrawerItem(icon: Icons.history_outlined, label: 'History', onTap: () {
-              Navigator.pop(context);
-              Navigator.push(context, MaterialPageRoute(
-                builder: (_) => TechnicianHistoryScreen(mobile: mobile)));
-            }),
-            _DrawerItem(icon: Icons.help_outline_rounded, label: 'Help & Support', onTap: () => Navigator.pop(context)),
-            const Spacer(),
-            const Divider(height: 1),
-            _DrawerItem(
-              icon: Icons.logout_rounded,
-              label: 'Logout',
-              isDestructive: true,
-              onTap: () {
-                Navigator.pop(context);
-                // TODO: clear session, navigate to onboarding
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DrawerItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool isActive;
-  final bool isDestructive;
-  const _DrawerItem({
-    required this.icon, required this.label, required this.onTap,
-    this.isActive = false, this.isDestructive = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isDestructive
-        ? const Color(0xFFD32F2F)
-        : isActive ? AppColors.brandGreen : AppColors.textSecondary;
-    return ListTile(
-      leading: Icon(icon, size: 20, color: color),
-      title: Text(label, style: TextStyle(
-          fontSize: 14,
-          fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
-          color: color)),
-      tileColor: isActive ? AppColors.brandGreenSurface : null,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-      visualDensity: VisualDensity.compact,
-      onTap: onTap,
-    );
-  }
-}

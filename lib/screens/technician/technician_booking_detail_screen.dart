@@ -1,10 +1,18 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:microlab/theme/app_theme.dart';
 import 'package:microlab/services/razorpay_service.dart';
 import 'technician_dashboard_screen.dart';
+
+// ─── Prescription doc model ──────────────────────────────────────────────────
+
+class _TechPresDoc {
+  final Uint8List bytes;
+  final String fileName;
+  final DateTime uploadedAt;
+  _TechPresDoc({required this.bytes, required this.fileName, required this.uploadedAt});
+}
 
 // ─── Test catalogue ───────────────────────────────────────────────────────────
 
@@ -99,10 +107,11 @@ class _TechnicianBookingDetailScreenState
   bool _showAddTest = false;
   String _searchQuery = '';
 
-  // Document
-  Uint8List? _docBytes;
-  String? _docFileName;
+  // Document — multi-image upload
+  final List<_TechPresDoc> _docUploads = [];
+  bool _docIsPicking = false;
   bool _docVerified = false;
+  static const int _docMaxFiles = 5;
   final ImagePicker _picker = ImagePicker();
 
   // Payment
@@ -113,12 +122,18 @@ class _TechnicianBookingDetailScreenState
   bool _showNewCustomerForm = false;
   final _ncNameCtrl    = TextEditingController();
   final _ncMobileCtrl  = TextEditingController();
-  final _ncAgeCtrl     = TextEditingController();
+  final _ncEmailCtrl   = TextEditingController();
+  final _ncDobCtrl     = TextEditingController();
   final _ncRelCtrl     = TextEditingController();
+  final _ncHealthCtrl  = TextEditingController();
+  DateTime? _ncDob;
+  int? _ncCalculatedAge;
   String? _ncGender;
   final List<String> _ncGenders = ['Male', 'Female', 'Other'];
   final List<String> _ncRelations = ['Self','Spouse','Father','Mother','Son','Daughter','Brother','Sister','Other'];
   late List<Map<String, String>> _additionalCustomerTests;
+  bool _showAddCustTest = false;
+  String _custTestSearch = '';
 
   // OTP
   final List<TextEditingController> _otpControllers =
@@ -194,14 +209,20 @@ class _TechnicianBookingDetailScreenState
       _showNewCustomerForm = false;
       _ncNameCtrl.clear();
       _ncMobileCtrl.clear();
-      _ncAgeCtrl.clear();
+      _ncEmailCtrl.clear();
+      _ncDobCtrl.clear();
       _ncRelCtrl.clear();
+      _ncHealthCtrl.clear();
+      _ncDob = null;
+      _ncCalculatedAge = null;
       _ncGender = null;
       _additionalCustomerTests.clear();
+      _showAddCustTest = false;
+      _custTestSearch = '';
     });
 
     // TODO: POST /api/bookings/additional
-    // { name, mobile, age, gender, relation, tests, booking_id, address }
+    // { name, mobile, email, dob, gender, relation, healthCondition, tests, booking_id, address }
 
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('$name added with ${tests.length} test(s) — visible in dashboard'),
@@ -217,11 +238,42 @@ class _TechnicianBookingDetailScreenState
     clearRazorpay();
     _ncNameCtrl.dispose();
     _ncMobileCtrl.dispose();
-    _ncAgeCtrl.dispose();
+    _ncEmailCtrl.dispose();
+    _ncDobCtrl.dispose();
     _ncRelCtrl.dispose();
+    _ncHealthCtrl.dispose();
     for (final c in _otpControllers) c.dispose();
     for (final f in _otpFocusNodes) f.dispose();
     super.dispose();
+  }
+
+  // ── New customer DOB picker ───────────────────────────────
+
+  Future<void> _pickNcDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _ncDob ?? DateTime(now.year - 30),
+      firstDate: DateTime(now.year - 120),
+      lastDate: now,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: AppColors.brandGreen),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      int age = now.year - picked.year;
+      if (now.month < picked.month ||
+          (now.month == picked.month && now.day < picked.day)) age--;
+      setState(() {
+        _ncDob = picked;
+        _ncCalculatedAge = age;
+        _ncDobCtrl.text =
+            '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+      });
+    }
   }
 
   // ── Journey advance ───────────────────────────────────────
@@ -412,9 +464,10 @@ class _TechnicianBookingDetailScreenState
       ),
     );
 
-    // Auto-focus first OTP box
+    // Auto-focus first OTP box — call directly on the node so it
+    // finds its own scope, avoiding the cross-scope assertion.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      FocusScope.of(context).requestFocus(_otpFocusNodes[0]);
+      _otpFocusNodes[0].requestFocus();
     });
   }
 
@@ -470,16 +523,81 @@ class _TechnicianBookingDetailScreenState
     }).toList();
   }
 
+  List<Map<String, String>> get _filteredCustCatalogue {
+    final already = _additionalCustomerTests.map((t) => t['id']).toSet();
+    return _testCatalogue.where((t) {
+      if (already.contains(t['id'])) return false;
+      if (_custTestSearch.isEmpty) return true;
+      return (t['name']?.toLowerCase().contains(_custTestSearch.toLowerCase()) ?? false) ||
+          (t['category']?.toLowerCase().contains(_custTestSearch.toLowerCase()) ?? false);
+    }).toList();
+  }
+
   // ── Document ──────────────────────────────────────────────
 
-  Future<void> _uploadDoc() async {
+  void _showDocSourcePicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: EdgeInsets.fromLTRB(20, 12, 20, MediaQuery.of(context).padding.bottom + 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 40, height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(color: AppColors.divider, borderRadius: BorderRadius.circular(2)),
+          ),
+          _DocSourceTile(Icons.camera_alt_outlined, 'Camera', 'Take a photo now',
+              () { Navigator.pop(context); _pickDoc(ImageSource.camera); }),
+          const SizedBox(height: 8),
+          _DocSourceTile(Icons.photo_library_outlined, 'Gallery', 'Choose from your photos',
+              () { Navigator.pop(context); _pickDoc(ImageSource.gallery); }),
+          const SizedBox(height: 4),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _pickDoc(ImageSource source) async {
+    if (_docIsPicking || _docUploads.length >= _docMaxFiles) return;
+    setState(() => _docIsPicking = true);
     try {
-      final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
-      if (picked != null) {
-        final bytes = await picked.readAsBytes();
-        setState(() { _docBytes = bytes; _docFileName = picked.name; });
+      if (source == ImageSource.gallery) {
+        final images = await _picker.pickMultiImage(imageQuality: 80);
+        if (images.isNotEmpty) {
+          final toAdd = images.take(_docMaxFiles - _docUploads.length);
+          final docs = await Future.wait(toAdd.map((f) async => _TechPresDoc(
+              bytes: await f.readAsBytes(),
+              fileName: f.name,
+              uploadedAt: DateTime.now())));
+          setState(() => _docUploads.addAll(docs));
+        }
+      } else {
+        final image = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+        if (image != null) {
+          final bytes = await image.readAsBytes();
+          setState(() => _docUploads.add(_TechPresDoc(
+              bytes: bytes, fileName: image.name, uploadedAt: DateTime.now())));
+        }
       }
     } catch (_) {}
+    setState(() => _docIsPicking = false);
+  }
+
+  void _viewDocImage(int index) {
+    Navigator.push(context, MaterialPageRoute(
+        builder: (_) => _DocImageViewerPage(images: _docUploads, initialIndex: index)));
+  }
+
+  void _deleteDocImage(int index) {
+    setState(() {
+      _docUploads.removeAt(index);
+      if (_docUploads.isEmpty) _docVerified = false;
+    });
   }
 
   // ── Payment ───────────────────────────────────────────────
@@ -953,7 +1071,7 @@ class _TechnicianBookingDetailScreenState
 
           const SizedBox(height: 14),
 
-          // ── Document Verification (always visible) ────────
+          // ── Prescription / Document (multi-image) ─────────
           _SectionCard(
             title: 'Prescription / Document',
             icon: Icons.description_outlined,
@@ -1000,9 +1118,41 @@ class _TechnicianBookingDetailScreenState
               ),
               const SizedBox(height: 12),
 
-              if (_docBytes == null)
+              // Thumbnail grid — shown when images are present
+              if (_docUploads.isNotEmpty) ...[
+                SizedBox(
+                  height: 104,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _docUploads.length +
+                        (_docUploads.length < _docMaxFiles ? 1 : 0),
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, i) {
+                      if (i == _docUploads.length) {
+                        return _DocAddMoreTile(
+                          onTap: _docIsPicking ? null : _showDocSourcePicker,
+                        );
+                      }
+                      return _DocThumbnailCard(
+                        doc: _docUploads[i],
+                        onView: () => _viewDocImage(i),
+                        onDelete: () => _deleteDocImage(i),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${_docUploads.length} of $_docMaxFiles image${_docUploads.length == 1 ? '' : 's'} uploaded',
+                  style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // Empty upload tile
+              if (_docUploads.isEmpty)
                 GestureDetector(
-                  onTap: _uploadDoc,
+                  onTap: _docIsPicking ? null : _showDocSourcePicker,
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 22),
@@ -1011,117 +1161,60 @@ class _TechnicianBookingDetailScreenState
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.divider, width: 1.5),
                     ),
-                    child: const Column(
+                    child: Column(
                       mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Icon(Icons.upload_file_outlined, size: 28, color: AppColors.brandGreen),
-                        SizedBox(height: 8),
-                        Text('Tap to upload prescription',
-                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.brandGreen)),
-                        SizedBox(height: 3),
-                        Text('JPG, PNG or PDF',
-                            style: TextStyle(fontSize: 11, color: AppColors.textHint)),
-                      ]),
+                        _docIsPicking
+                            ? const SizedBox(
+                                width: 24, height: 24,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: AppColors.brandGreen))
+                            : const Icon(Icons.upload_file_outlined,
+                                size: 28, color: AppColors.brandGreen),
+                        const SizedBox(height: 8),
+                        Text(
+                          _docIsPicking ? 'Picking…' : 'Tap to upload prescription',
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.brandGreen),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Up to $_docMaxFiles images · JPG or PNG',
+                          style: const TextStyle(fontSize: 11, color: AppColors.textHint),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 
-              if (_docBytes != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.brandGreenSurface,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _docVerified ? AppColors.brandGreen : AppColors.brandGreenLight),
+              // Verify / verified row
+              if (_docUploads.isNotEmpty && !_docVerified) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => setState(() => _docVerified = true),
+                    icon: const Icon(Icons.verified_outlined, size: 16),
+                    label: const Text('Mark as Verified',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.brandGreen,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
                   ),
-                  child: Row(children: [
-                    Container(
-                      width: 44, height: 44,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.divider),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(7),
-                        child: Image.memory(_docBytes!, fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(
-                            Icons.insert_drive_file_outlined, color: AppColors.brandGreen)),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(_docFileName ?? 'prescription.jpg',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                          overflow: TextOverflow.ellipsis),
-                      Text(
-                        _docVerified ? '✓ Verified' : 'Pending verification',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: _docVerified ? AppColors.brandGreen : const Color(0xFFE65100),
-                        ),
-                      ),
-                    ])),
-                    // View icon
-                    GestureDetector(
-                      onTap: () {
-                        showDialog(context: context, builder: (_) => Dialog(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.memory(_docBytes!, fit: BoxFit.contain)),
-                        ));
-                      },
-                      child: Container(
-                        width: 36, height: 36,
-                        margin: const EdgeInsets.only(right: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.divider),
-                        ),
-                        child: const Icon(Icons.visibility_outlined, size: 18, color: AppColors.brandGreen),
-                      ),
-                    ),
-                    // Remove icon
-                    GestureDetector(
-                      onTap: () => setState(() {
-                        _docBytes = null;
-                        _docFileName = null;
-                        _docVerified = false;
-                      }),
-                      child: Container(
-                        width: 36, height: 36,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.divider),
-                        ),
-                        child: const Icon(Icons.close_rounded, size: 18, color: AppColors.textHint),
-                      ),
-                    ),
-                  ]),
                 ),
-
-                if (!_docVerified) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () => setState(() => _docVerified = true),
-                      icon: const Icon(Icons.verified_outlined, size: 16),
-                      label: const Text('Mark as Verified',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.brandGreen,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 11),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ),
-                ],
+              ],
+              if (_docVerified) ...[
+                const SizedBox(height: 8),
+                const Row(children: [
+                  Icon(Icons.check_circle_rounded, size: 14, color: AppColors.brandGreen),
+                  SizedBox(width: 6),
+                  Text('All documents verified',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.brandGreen)),
+                ]),
               ],
             ]),
           ),
@@ -1159,7 +1252,7 @@ class _TechnicianBookingDetailScreenState
                     label: Text(_isProcessingPayment ? 'Processing…' : 'Collect ₹${_amountDue.toInt()} via Razorpay',
                         style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.brandGreen, foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFF1565C0), foregroundColor: Colors.white,
                       elevation: 0, padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -1225,14 +1318,66 @@ class _TechnicianBookingDetailScreenState
                   ),
                   const SizedBox(height: 10),
 
-                  // Age
+                  // Email
                   _FormField(
-                    label: 'Age',
-                    controller: _ncAgeCtrl,
-                    hint: 'Age in years',
-                    icon: Icons.cake_outlined,
-                    keyboardType: TextInputType.number,
-                    maxLength: 3,
+                    label: 'Email Address',
+                    controller: _ncEmailCtrl,
+                    hint: 'example@email.com',
+                    icon: Icons.email_outlined,
+                    keyboardType: TextInputType.emailAddress,
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Date of Birth
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Date of Birth',
+                          style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                      const SizedBox(height: 6),
+                      GestureDetector(
+                        onTap: _pickNcDate,
+                        child: Container(
+                          height: 50,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          decoration: BoxDecoration(
+                            color: AppColors.background,
+                            border: Border.all(color: AppColors.divider),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(children: [
+                            const Icon(Icons.cake_outlined, size: 18, color: AppColors.textHint),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _ncDobCtrl.text.isEmpty ? 'DD/MM/YYYY' : _ncDobCtrl.text,
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: _ncDobCtrl.text.isEmpty
+                                        ? AppColors.textHint
+                                        : AppColors.textPrimary),
+                              ),
+                            ),
+                            if (_ncCalculatedAge != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.brandGreenSurface,
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text('$_ncCalculatedAge yrs',
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.brandGreen,
+                                        fontWeight: FontWeight.w600)),
+                              ),
+                            const SizedBox(width: 6),
+                            const Icon(Icons.calendar_month_outlined,
+                                size: 18, color: AppColors.textSecondary),
+                          ]),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 10),
 
@@ -1288,6 +1433,16 @@ class _TechnicianBookingDetailScreenState
                   ),
                   const SizedBox(height: 12),
 
+                  // Health Condition / Notes
+                  _FormField(
+                    label: 'Health Condition / Notes',
+                    controller: _ncHealthCtrl,
+                    hint: 'e.g. Diabetes, Hypertension, Thyroid…',
+                    icon: Icons.medical_information_outlined,
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: 12),
+
                   // Tests for new customer
                   const Text('Tests for this customer',
                       style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
@@ -1319,36 +1474,73 @@ class _TechnicianBookingDetailScreenState
                   )),
 
                   const SizedBox(height: 6),
-                  // Add test from catalogue
-                  PopupMenuButton<Map<String, String>>(
-                    offset: const Offset(0, -8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    itemBuilder: (_) => _testCatalogue
-                        .where((t) => !_additionalCustomerTests.any((x) => x['id'] == t['id']))
-                        .map((t) => PopupMenuItem(
-                              value: t,
-                              height: 44,
-                              child: Row(children: [
-                                Expanded(child: Text(t['name'] ?? '', style: const TextStyle(fontSize: 13))),
-                                Text('₹${t['price']}', style: const TextStyle(fontSize: 12, color: AppColors.brandGreen)),
-                              ]),
-                            ))
-                        .toList(),
-                    onSelected: (t) => setState(() => _additionalCustomerTests.add(Map<String, String>.from(t))),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.brandGreenLight),
+                  // Add test — search and select
+                  if (!_showAddCustTest)
+                    GestureDetector(
+                      onTap: () => setState(() => _showAddCustTest = true),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.brandGreenLight),
+                        ),
+                        child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                          Icon(Icons.add_circle_outline, size: 15, color: AppColors.brandGreen),
+                          SizedBox(width: 6),
+                          Text('Add Test', style: TextStyle(fontSize: 12, color: AppColors.brandGreen, fontWeight: FontWeight.w500)),
+                        ]),
                       ),
-                      child: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.add_circle_outline, size: 15, color: AppColors.brandGreen),
-                        SizedBox(width: 6),
-                        Text('Add Test', style: TextStyle(fontSize: 12, color: AppColors.brandGreen, fontWeight: FontWeight.w500)),
-                      ]),
                     ),
-                  ),
+
+                  if (_showAddCustTest) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      autofocus: true,
+                      onChanged: (v) => setState(() => _custTestSearch = v),
+                      style: const TextStyle(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Search test…',
+                        hintStyle: const TextStyle(color: AppColors.textHint, fontSize: 13),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 18, color: AppColors.textHint),
+                        suffixIcon: GestureDetector(
+                          onTap: () => setState(() { _showAddCustTest = false; _custTestSearch = ''; }),
+                          child: const Icon(Icons.close_rounded, size: 18, color: AppColors.textHint),
+                        ),
+                        filled: true, fillColor: AppColors.background,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.divider)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.divider)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.brandGreen, width: 1.5)),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ..._filteredCustCatalogue.take(5).map((t) => GestureDetector(
+                      onTap: () => setState(() {
+                        _additionalCustomerTests.add(Map<String, String>.from(t));
+                        _showAddCustTest = false;
+                        _custTestSearch = '';
+                      }),
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: AppColors.divider),
+                        ),
+                        child: Row(children: [
+                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(t['name'] ?? '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                            Text(t['category'] ?? '', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                          ])),
+                          Text('₹${t['price']}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.brandGreen)),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.add_circle_outline, size: 18, color: AppColors.brandGreen),
+                        ]),
+                      ),
+                    )),
+                  ],
 
                   const SizedBox(height: 14),
 
@@ -1359,8 +1551,11 @@ class _TechnicianBookingDetailScreenState
                         onPressed: () => setState(() {
                           _showNewCustomerForm = false;
                           _ncNameCtrl.clear(); _ncMobileCtrl.clear();
-                          _ncAgeCtrl.clear(); _ncRelCtrl.clear();
+                          _ncEmailCtrl.clear(); _ncDobCtrl.clear();
+                          _ncRelCtrl.clear(); _ncHealthCtrl.clear();
+                          _ncDob = null; _ncCalculatedAge = null;
                           _ncGender = null; _additionalCustomerTests.clear();
+                          _showAddCustTest = false; _custTestSearch = '';
                         }),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.textSecondary,
@@ -1638,14 +1833,16 @@ class _FormField extends StatelessWidget {
   final IconData icon;
   final TextInputType keyboardType;
   final int? maxLength;
+  final int maxLines;
 
   const _FormField({
     required this.label,
     required this.controller,
     required this.hint,
     required this.icon,
-    required this.keyboardType,
+    this.keyboardType = TextInputType.text,
     this.maxLength,
+    this.maxLines = 1,
   });
 
   @override
@@ -1659,6 +1856,7 @@ class _FormField extends StatelessWidget {
             controller: controller,
             keyboardType: keyboardType,
             maxLength: maxLength,
+            maxLines: maxLines,
             style: const TextStyle(fontSize: 14),
             decoration: InputDecoration(
               hintText: hint,
@@ -1676,9 +1874,223 @@ class _FormField extends StatelessWidget {
               focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(color: AppColors.brandGreen, width: 1.5)),
-              contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              contentPadding: EdgeInsets.symmetric(
+                  vertical: maxLines > 1 ? 14 : 12, horizontal: 14),
             ),
           ),
         ],
+      );
+}
+
+// ─── Document upload widgets ──────────────────────────────────────────────────
+
+class _DocThumbnailCard extends StatelessWidget {
+  final _TechPresDoc doc;
+  final VoidCallback onView;
+  final VoidCallback onDelete;
+  const _DocThumbnailCard({
+    required this.doc,
+    required this.onView,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onView,
+        child: Stack(clipBehavior: Clip.none, children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.divider),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.memory(doc.bytes, fit: BoxFit.cover),
+            ),
+          ),
+          Positioned(
+            top: -6,
+            right: -6,
+            child: GestureDetector(
+              onTap: onDelete,
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: const BoxDecoration(
+                    color: Color(0xFFD32F2F), shape: BoxShape.circle),
+                child: const Icon(Icons.close_rounded, size: 13, color: Colors.white),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 6,
+            right: 6,
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.45),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Icon(Icons.fullscreen_rounded, size: 14, color: Colors.white),
+            ),
+          ),
+        ]),
+      );
+}
+
+class _DocAddMoreTile extends StatelessWidget {
+  final VoidCallback? onTap;
+  const _DocAddMoreTile({this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 96,
+          height: 96,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.brandGreenLight, width: 1.5),
+            color: AppColors.brandGreenSurface,
+          ),
+          child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.add_photo_alternate_outlined, size: 26, color: AppColors.brandGreen),
+            SizedBox(height: 4),
+            Text('Add more',
+                style: TextStyle(
+                    fontSize: 10,
+                    color: AppColors.brandGreen,
+                    fontWeight: FontWeight.w500)),
+          ]),
+        ),
+      );
+}
+
+class _DocSourceTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  const _DocSourceTile(this.icon, this.title, this.subtitle, this.onTap);
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(
+                  color: AppColors.brandGreenSurface, shape: BoxShape.circle),
+              child: Icon(icon, size: 20, color: AppColors.brandGreen),
+            ),
+            const SizedBox(width: 14),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              Text(subtitle,
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textSecondary)),
+            ]),
+            const Spacer(),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textHint),
+          ]),
+        ),
+      );
+}
+
+// ─── Full-screen document image viewer ───────────────────────────────────────
+
+class _DocImageViewerPage extends StatefulWidget {
+  final List<_TechPresDoc> images;
+  final int initialIndex;
+  const _DocImageViewerPage({required this.images, required this.initialIndex});
+
+  @override
+  State<_DocImageViewerPage> createState() => _DocImageViewerPageState();
+}
+
+class _DocImageViewerPageState extends State<_DocImageViewerPage> {
+  late final PageController _pageCtrl;
+  late int _current;
+
+  @override
+  void initState() {
+    super.initState();
+    _current = widget.initialIndex;
+    _pageCtrl = PageController(initialPage: _current);
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          iconTheme: const IconThemeData(color: Colors.white),
+          title: Text(
+            '${_current + 1} / ${widget.images.length}',
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Text(
+                  widget.images[_current].fileName,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+          ],
+        ),
+        body: Column(children: [
+          Expanded(
+            child: PageView.builder(
+              controller: _pageCtrl,
+              itemCount: widget.images.length,
+              onPageChanged: (i) => setState(() => _current = i),
+              itemBuilder: (_, i) => InteractiveViewer(
+                maxScale: 5.0,
+                child: Center(
+                  child: Image.memory(widget.images[i].bytes, fit: BoxFit.contain),
+                ),
+              ),
+            ),
+          ),
+          if (widget.images.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 24, top: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(widget.images.length, (i) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: _current == i ? 16 : 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: _current == i ? Colors.white : Colors.white38,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                )),
+              ),
+            ),
+        ]),
       );
 }

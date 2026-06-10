@@ -4,7 +4,8 @@ import 'technician_dashboard_screen.dart';
 
 class TechnicianHistoryScreen extends StatelessWidget {
   final String mobile;
-  const TechnicianHistoryScreen({super.key, required this.mobile});
+  final bool embedded;
+  const TechnicianHistoryScreen({super.key, required this.mobile, this.embedded = false});
 
   // Mock completed history — replace with GET /api/technician/bookings?status=completed
   static List<TechnicianBooking> _mockHistory() => [
@@ -79,10 +80,58 @@ class TechnicianHistoryScreen extends StatelessWidget {
     final completed = history.where((b) => b.status == 'Completed').toList();
     final cancelled = history.where((b) => b.status == 'Cancelled').toList();
 
+    if (embedded) {
+      return DefaultTabController(
+        length: 2,
+        child: Column(
+          children: [
+            Container(
+              color: AppColors.brandGreen,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(16, MediaQuery.of(context).padding.top + 14, 16, 8),
+                    child: const Text('History',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                  TabBar(
+                    indicatorColor: Colors.white,
+                    indicatorWeight: 3,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white60,
+                    labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                    tabs: [
+                      Tab(text: 'Completed (${completed.length})'),
+                      Tab(text: 'Cancelled (${cancelled.length})'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ColoredBox(
+                color: AppColors.background,
+                child: TabBarView(
+                  children: [
+                    _BookingList(bookings: completed, formatDate: _formatDate),
+                    _BookingList(bookings: cancelled, formatDate: _formatDate),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return DefaultTabController(
       length: 2,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF4F6F8),
+        backgroundColor: AppColors.background,
         appBar: AppBar(
           backgroundColor: AppColors.brandGreen,
           elevation: 0,
@@ -188,7 +237,7 @@ class _HistoryCard extends StatelessWidget {
             // Status strip
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              color: statusColor.withOpacity(0.07),
+              color: statusColor.withValues(alpha: 0.07),
               child: Row(children: [
                 Icon(
                   isCompleted ? Icons.check_circle_outline : Icons.cancel_outlined,

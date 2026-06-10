@@ -3,6 +3,13 @@ allprojects {
         google()
         mavenCentral()
     }
+    // Suppress "source/target value 8 is obsolete" warnings from third-party plugins
+    // (razorpay_flutter, image_picker_android) that still declare Java 8 compatibility.
+    afterEvaluate {
+        tasks.withType<JavaCompile> {
+            options.compilerArgs.add("-Xlint:-options")
+        }
+    }
 }
 
 val newBuildDir: Directory =

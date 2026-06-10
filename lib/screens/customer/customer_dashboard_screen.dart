@@ -1,12 +1,12 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:microlab/theme/app_theme.dart';
 import 'customer_home_screen.dart';
 import 'checkout_screen.dart';
 import 'my_bookings_screen.dart';
 import 'package:microlab/models.dart';
 import 'reports_screen.dart';
-import 'offers_screen.dart';
 
 
 
@@ -16,11 +16,15 @@ class CustomerDashboardScreen extends StatefulWidget {
   final MemberModel member;
   final List<TestModel> initialCartTests;
   final bool isVip;
+  final bool embedded;
+  final VoidCallback? onBack;
   const CustomerDashboardScreen({
     super.key,
     required this.member,
     this.initialCartTests = const [],
     this.isVip = false,
+    this.embedded = false,
+    this.onBack,
   });
 
   @override
@@ -180,6 +184,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
   }
 
   bool _inCart(TestModel test) => _cart.any((t) => t.id == test.id);
+  double get _cartTotal => _cart.fold(0.0, (s, t) => s + t.finalPrice);
 
   void _uploadPrescription() {
     showModalBottomSheet(
@@ -244,20 +249,6 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     );
   }
 
-  void _showAllTests() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _AllTestsSheet(
-        tests: _allTests,
-        cart: _cart,
-        onToggleCart: _toggleCart,
-        inCart: _inCart,
-      ),
-    );
-  }
-
   void _showTestDetail(TestModel test) {
     showModalBottomSheet(
       context: context,
@@ -271,6 +262,74 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
     );
   }
 
+  Widget _buildCartBar(BuildContext context) {
+    final bottomPad = MediaQuery.of(context).padding.bottom;
+    return Container(
+      padding: EdgeInsets.fromLTRB(16, 10, 16, bottomPad + 10),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: AppColors.divider)),
+      ),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        decoration: BoxDecoration(
+          color: AppColors.brandGreen,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.brandGreen.withValues(alpha: 0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: Text('${_cart.length}',
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${_cart.length} item${_cart.length > 1 ? 's' : ''} added',
+                      style: const TextStyle(
+                          color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text('₹${_cartTotal.toInt()} total',
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.8), fontSize: 11)),
+                ],
+              ),
+            ),
+            ElevatedButton(
+              onPressed: _showCart,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: AppColors.brandGreen,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('View Cart',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -280,22 +339,24 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      backgroundColor: const Color(0xFFF4F6F8),
-      drawer: _AppDrawer(member: widget.member, isVip: widget.isVip),
-      body: CustomScrollView(
-        controller: _scrollController,
+    final body = CustomScrollView(
+      controller: _scrollController,
         slivers: [
           // ── App Bar ──────────────────────────────────────
           SliverAppBar(
             pinned: true,
             elevation: 0,
             backgroundColor: AppColors.brandGreen,
-            leading: IconButton(
-              icon: const Icon(Icons.menu_rounded, color: Colors.white),
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-            ),
+            leading: widget.embedded
+                ? IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white, size: 18),
+                    onPressed: widget.onBack,
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.menu_rounded, color: Colors.white),
+                    onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                  ),
             title: _HeaderTitle(member: widget.member, isVip: widget.isVip),
             actions: [
               // Cart
@@ -350,6 +411,11 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const SizedBox(height: 16),
+
+                // ── Trust banner ──────────────────────────
+                const _TrustBanner(),
+
                 const SizedBox(height: 16),
 
                 // ── Search + Upload ───────────────────────
@@ -469,83 +535,77 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
-                // ── Tests/Packages header ─────────────────
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    _searchQuery.isNotEmpty
-                        ? '${_filteredTests.length} result${_filteredTests.length == 1 ? "" : "s"}'
-                        : _selectedCategory == 'All'
-                            ? 'Tests & Packages'
-                            : _selectedCategory,
-                    style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary),
-                  ),
-                ),
-
-                const SizedBox(height: 10),
-
-                // ── Test cards ────────────────────────────
+                // ── Content ───────────────────────────────
                 if (_loadingTests)
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
+                    padding: EdgeInsets.symmetric(vertical: 60),
                     child: Center(
-                      child: CircularProgressIndicator(
-                          color: AppColors.brandGreen),
+                      child: CircularProgressIndicator(color: AppColors.brandGreen),
                     ),
                   )
                 else if (_filteredTests.isEmpty)
                   const Padding(
-                    padding:
-                        EdgeInsets.symmetric(vertical: 40, horizontal: 16),
+                    padding: EdgeInsets.symmetric(vertical: 40, horizontal: 16),
                     child: Center(
                       child: Text('No tests found',
-                          style: TextStyle(
-                              fontSize: 14,
-                              color: AppColors.textSecondary)),
+                          style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
                     ),
                   )
-                else
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: _filteredTests.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, i) => _TestCard(
-                      test: _filteredTests[i],
-                      inCart: _inCart(_filteredTests[i]),
-                      onAdd: () => _toggleCart(_filteredTests[i]),
-                      onTap: () => _showTestDetail(_filteredTests[i]),
+                else ...[
+                  // Tests — full-width list
+                  if (_filteredTests.isNotEmpty) ...[
+                    _SectionHeader(
+                      title: _searchQuery.isNotEmpty
+                          ? '${_filteredTests.length} result${_filteredTests.length == 1 ? "" : "s"}'
+                          : 'Tests & Packages',
                     ),
-                  ),
+                    const SizedBox(height: 10),
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: _filteredTests.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) => _TestCard(
+                        test: _filteredTests[i],
+                        inCart: _inCart(_filteredTests[i]),
+                        onAdd: () => _toggleCart(_filteredTests[i]),
+                        onTap: () => _showTestDetail(_filteredTests[i]),
+                      ),
+                    ),
+                  ],
+                ],
 
-                const SizedBox(height: 100),
+                const SizedBox(height: 120),
               ],
             ),
           ),
         ],
-      ),
+    );
 
-      // Proceed to book FAB (visible only when cart has items)
-      floatingActionButton: _cart.isNotEmpty
-          ? FloatingActionButton.extended(
-              onPressed: _showCart,
-              backgroundColor: AppColors.brandGreen,
-              foregroundColor: Colors.white,
-              elevation: 3,
-              icon: const Icon(Icons.shopping_cart_outlined, size: 20),
-              label: Text(
-                '${_cart.length} item${_cart.length > 1 ? 's' : ''} · Proceed',
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w500),
-              ),
-            )
-          : null,
+    if (widget.embedded) {
+      return Stack(
+        children: [
+          body,
+          if (_cart.isNotEmpty)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: MediaQuery.of(context).padding.bottom + 16,
+              child: _buildCartBar(context),
+            ),
+        ],
+      );
+    }
+
+    return Scaffold(
+      key: _scaffoldKey,
+      backgroundColor: AppColors.background,
+      drawer: _AppDrawer(member: widget.member, isVip: widget.isVip),
+      body: body,
+      bottomNavigationBar: _cart.isNotEmpty ? _buildCartBar(context) : null,
     );
   }
 }
@@ -802,14 +862,16 @@ class _LocationSheetState extends State<_LocationSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      padding: EdgeInsets.fromLTRB(
-          20, 0, 20, MediaQuery.of(context).padding.bottom + 20),
+      padding: EdgeInsets.fromLTRB(20, 0, 20, bottomInset + safeBottom + 20),
       child: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1362,6 +1424,77 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
+// ─── Trust Banner ────────────────────────────────────────────────────────────
+
+class _TrustBanner extends StatelessWidget {
+  const _TrustBanner();
+
+  static const _items = [
+    (Icons.home_outlined, 'Home Collection'),
+    (Icons.verified_outlined, 'NABL Certified'),
+    (Icons.schedule_rounded, 'Reports in 24 hrs'),
+    (Icons.lock_outline_rounded, '100% Secure'),
+    (Icons.medical_services_outlined, 'Doctor Support'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: _items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final (icon, label) = _items[i];
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.brandGreenSurface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.brandGreenLight),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 14, color: AppColors.brandGreen),
+                const SizedBox(width: 6),
+                Text(label,
+                    style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.brandGreen)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─── Section Header ───────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  const _SectionHeader({required this.title});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Text(title,
+          style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary)),
+    );
+  }
+}
+
+
+
 // ─── Test Detail Sheet ────────────────────────────────────────────────────────
 
 class _TestDetailSheet extends StatelessWidget {
@@ -1566,74 +1699,9 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-// ─── All Tests Sheet ──────────────────────────────────────────────────────────
-
-class _AllTestsSheet extends StatelessWidget {
-  final List<TestModel> tests;
-  final List<TestModel> cart;
-  final ValueChanged<TestModel> onToggleCart;
-  final bool Function(TestModel) inCart;
-  const _AllTestsSheet({
-    required this.tests,
-    required this.cart,
-    required this.onToggleCart,
-    required this.inCart,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.90),
-      child: Column(
-        children: [
-          Center(
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: Row(
-              children: [
-                Text('All Tests & Packages',
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary)),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 40),
-              itemCount: tests.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (_, i) => _TestCard(
-                test: tests[i],
-                inCart: inCart(tests[i]),
-                onAdd: () => onToggleCart(tests[i]),
-                onTap: () {},
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ─── Cart Sheet ───────────────────────────────────────────────────────────────
 
-class _CartSheet extends StatelessWidget {
+class _CartSheet extends StatefulWidget {
   final List<TestModel> cart;
   final ValueChanged<TestModel> onRemove;
   final VoidCallback onCheckout;
@@ -1643,10 +1711,21 @@ class _CartSheet extends StatelessWidget {
     required this.onCheckout,
   });
 
-  double get _total => cart.fold(0, (s, t) => s + t.finalPrice);
+  @override
+  State<_CartSheet> createState() => _CartSheetState();
+}
+
+class _CartSheetState extends State<_CartSheet> {
+  double get _total => widget.cart.fold(0, (s, t) => s + t.finalPrice);
+
+  void _remove(TestModel t) {
+    widget.onRemove(t); // mutates parent's list via parent setState
+    setState(() {});    // rebuild sheet with updated list
+  }
 
   @override
   Widget build(BuildContext context) {
+    final cart = widget.cart;
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.white,
@@ -1654,109 +1733,140 @@ class _CartSheet extends StatelessWidget {
       ),
       constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.75),
-      child: Column(
-        children: [
-          Center(
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                  color: AppColors.divider,
-                  borderRadius: BorderRadius.circular(2)),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: cart.isEmpty
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Cart  (${cart.length} item${cart.length > 1 ? 's' : ''})',
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary)),
-                Text('₹${_total.toInt()}',
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.brandGreen)),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              itemCount: cart.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (_, i) {
-                final t = cart[i];
-                return Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.background,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.divider),
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 12),
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(
+                        color: AppColors.divider,
+                        borderRadius: BorderRadius.circular(2)),
                   ),
+                ),
+                const SizedBox(height: 24),
+                const Icon(Icons.shopping_cart_outlined,
+                    size: 40, color: AppColors.textHint),
+                const SizedBox(height: 12),
+                const Text('Cart is empty',
+                    style: TextStyle(fontSize: 15, color: AppColors.textSecondary)),
+                SizedBox(height: MediaQuery.of(context).padding.bottom + 32),
+              ],
+            )
+          : Column(
+              children: [
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 12),
+                    width: 40, height: 4,
+                    decoration: BoxDecoration(
+                        color: AppColors.divider,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(t.name,
-                                style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.textPrimary)),
-                            const SizedBox(height: 2),
-                            Text(t.category,
-                                style: const TextStyle(
-                                    fontSize: 12,
-                                    color: AppColors.textSecondary)),
-                          ],
-                        ),
-                      ),
-                      Text('₹${t.finalPrice.toInt()}',
+                      Text('Cart  (${cart.length} item${cart.length > 1 ? 's' : ''})',
                           style: const TextStyle(
-                              fontSize: 14,
+                              fontSize: 16,
                               fontWeight: FontWeight.w600,
                               color: AppColors.textPrimary)),
-                      const SizedBox(width: 10),
-                      GestureDetector(
-                        onTap: () => onRemove(t),
-                        child: const Icon(Icons.close_rounded,
-                            size: 18, color: AppColors.textHint),
-                      ),
+                      Text('₹${_total.toInt()}',
+                          style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.brandGreen)),
                     ],
                   ),
-                );
-              },
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-                20, 8, 20, MediaQuery.of(context).padding.bottom + 16),
-            child: SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: onCheckout,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.brandGreen,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
                 ),
-                child: Text('Proceed to Book  ·  ₹${_total.toInt()}',
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w500)),
-              ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    itemCount: cart.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) {
+                      final t = cart[i];
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.background,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.divider),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(t.name,
+                                      style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textPrimary)),
+                                  const SizedBox(height: 2),
+                                  Text(t.category,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          color: AppColors.textSecondary)),
+                                ],
+                              ),
+                            ),
+                            Text('₹${t.finalPrice.toInt()}',
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary)),
+                            const SizedBox(width: 10),
+                            GestureDetector(
+                              onTap: () => _remove(t),
+                              child: Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFF5F5),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFFFFCDD2)),
+                                ),
+                                child: const Icon(Icons.close_rounded,
+                                    size: 16, color: Color(0xFFD32F2F)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                      20, 8, 20, MediaQuery.of(context).padding.bottom + 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: widget.onCheckout,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.brandGreen,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: Text('Proceed to Book  ·  ₹${_total.toInt()}',
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w500)),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -1905,12 +2015,9 @@ class _PrescriptionUploadSheet extends StatefulWidget {
 }
 
 class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
-  // Prescription state
-  // In production: use image_picker to get Uint8List bytes
-  bool _uploaded = false;
-  String? _uploadedFileName;
-  DateTime? _uploadedDate;
-  String _status = 'Pending Review'; // updated by technician via API
+  static const int _maxFiles = 5;
+  final List<_PresDoc> _uploads = [];
+  bool _isPicking = false;
 
   // Mock previous prescriptions
   final List<Map<String, dynamic>> _previous = [
@@ -1928,96 +2035,168 @@ class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
     },
   ];
 
-  void _mockUpload() async {
-    // TODO: use image_picker → POST /api/prescriptions
-    // final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    // if (picked != null) { bytes = await picked.readAsBytes(); ... }
-    await Future.delayed(const Duration(milliseconds: 400));
-    setState(() {
-      _uploaded = true;
-      _uploadedFileName = 'prescription_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      _uploadedDate = DateTime.now();
-      _status = 'Pending Review';
-    });
-  }
-
-  void _viewPrescription() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Opening prescription preview…'),
-        backgroundColor: AppColors.brandGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  // ── Image picking ─────────────────────────────────────────
+  void _showSourcePicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36, height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+              _SourceTile(
+                icon: Icons.camera_alt_outlined,
+                label: 'Take a photo',
+                sub: 'Use camera to capture prescription',
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickFrom(ImageSource.camera);
+                },
+              ),
+              const SizedBox(height: 10),
+              _SourceTile(
+                icon: Icons.photo_library_outlined,
+                label: 'Choose from gallery',
+                sub: 'Select one or more images',
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickFrom(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
-    // TODO: open full-screen image viewer
   }
 
-  void _callSupport() async {
+  Future<void> _pickFrom(ImageSource source) async {
+    if (_isPicking) return;
+    setState(() => _isPicking = true);
+    try {
+      final picker = ImagePicker();
+      if (source == ImageSource.gallery) {
+        final files = await picker.pickMultiImage(imageQuality: 85);
+        for (final f in files) {
+          if (_uploads.length >= _maxFiles) break;
+          final bytes = await f.readAsBytes();
+          if (!mounted) return;
+          setState(() => _uploads.add(_PresDoc(
+            bytes: bytes,
+            fileName: f.name,
+            uploadedAt: DateTime.now(),
+          )));
+        }
+      } else {
+        final f = await picker.pickImage(
+            source: ImageSource.camera, imageQuality: 85);
+        if (f != null && _uploads.length < _maxFiles) {
+          final bytes = await f.readAsBytes();
+          if (!mounted) return;
+          setState(() => _uploads.add(_PresDoc(
+            bytes: bytes,
+            fileName: f.name,
+            uploadedAt: DateTime.now(),
+          )));
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isPicking = false);
+    }
+  }
+
+  void _viewImage(int index) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            _ImageViewerPage(docs: _uploads, initialIndex: index),
+      ),
+    );
+  }
+
+  void _deleteImage(int index) {
+    setState(() => _uploads.removeAt(index));
+  }
+
+  void _callSupport() {
     // TODO: launch('tel:+911800XXXXXX')
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(children: [
-          Icon(Icons.phone_outlined, color: Colors.white, size: 16),
-          SizedBox(width: 8),
-          Expanded(child: Text('Calling support…')),
-        ]),
-        backgroundColor: AppColors.brandGreen,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: const Row(children: [
+        Icon(Icons.phone_outlined, color: Colors.white, size: 16),
+        SizedBox(width: 8),
+        Expanded(child: Text('Calling support…')),
+      ]),
+      backgroundColor: AppColors.brandGreen,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
   }
 
   void _submit() {
-    if (!_uploaded) return;
+    if (_uploads.isEmpty) return;
     Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(children: [
-          Icon(Icons.check_circle_outline, color: Colors.white, size: 16),
-          SizedBox(width: 8),
-          Expanded(child: Text('Prescription submitted. Our technician will review and contact you.')),
-        ]),
-        backgroundColor: AppColors.brandGreen,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 4),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
-
-  String _formatDate(DateTime d) {
-    const months = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return '${d.day} ${months[d.month]} ${d.year}, ${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
+    // TODO: POST /api/prescriptions with _uploads.map((d) => d.bytes)
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        const Icon(Icons.check_circle_outline, color: Colors.white, size: 16),
+        const SizedBox(width: 8),
+        Expanded(
+            child: Text(
+                '${_uploads.length} prescription image${_uploads.length > 1 ? 's' : ''} submitted. Our technician will review and contact you.')),
+      ]),
+      backgroundColor: AppColors.brandGreen,
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    ));
   }
 
   Color _statusColor(String s) {
-    if (s.contains('assigned') || s.contains('Reviewed')) return AppColors.brandGreen;
+    if (s.contains('assigned') || s.contains('Reviewed')) {
+      return AppColors.brandGreen;
+    }
     if (s.contains('Pending')) return const Color(0xFFE65100);
     return const Color(0xFF1565C0);
   }
 
   @override
   Widget build(BuildContext context) {
+    final canAddMore = _uploads.length < _maxFiles;
+
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.90),
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.92),
       child: Column(
         children: [
-          // Handle
+          // ── Handle ──────────────────────────────────────
           Center(
             child: Container(
               margin: const EdgeInsets.symmetric(vertical: 12),
-              width: 40, height: 4,
-              decoration: BoxDecoration(color: AppColors.divider, borderRadius: BorderRadius.circular(2)),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: AppColors.divider,
+                  borderRadius: BorderRadius.circular(2)),
             ),
           ),
 
-          // Header with support call button
+          // ── Header ──────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 16, 12),
             child: Row(
@@ -2026,18 +2205,22 @@ class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Upload Prescription',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                      const Text('Upload Prescription',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
                       Text('For ${widget.member.name}',
-                          style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textSecondary)),
                     ],
                   ),
                 ),
-                // Support call button
                 GestureDetector(
                   onTap: _callSupport,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: AppColors.brandGreenSurface,
                       borderRadius: BorderRadius.circular(20),
@@ -2046,10 +2229,14 @@ class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.support_agent_outlined, size: 16, color: AppColors.brandGreen),
+                        Icon(Icons.support_agent_outlined,
+                            size: 16, color: AppColors.brandGreen),
                         SizedBox(width: 6),
                         Text('Support Call',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.brandGreen)),
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.brandGreen)),
                       ],
                     ),
                   ),
@@ -2065,8 +2252,7 @@ class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-
-                  // ── Info note ─────────────────────────────
+                  // ── Info note ────────────────────────────
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -2077,12 +2263,16 @@ class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
                     child: const Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(Icons.info_outline_rounded, size: 14, color: AppColors.brandGreen),
+                        Icon(Icons.info_outline_rounded,
+                            size: 14, color: AppColors.brandGreen),
                         SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Upload your doctor\'s prescription. Our technician will review it and assign the right tests, or call you if clarification is needed.',
-                            style: TextStyle(fontSize: 12, color: AppColors.brandGreen, height: 1.4),
+                            "Upload your doctor's prescription. You can add up to 5 images. Our technician will review and assign the right tests.",
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.brandGreen,
+                                height: 1.4),
                           ),
                         ),
                       ],
@@ -2091,207 +2281,204 @@ class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
 
                   const SizedBox(height: 16),
 
-                  // ── Customer name chip ────────────────────
+                  // ── Patient chip ─────────────────────────
                   Row(children: [
-                    const Icon(Icons.person_outline, size: 14, color: AppColors.textHint),
+                    const Icon(Icons.person_outline,
+                        size: 14, color: AppColors.textHint),
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: AppColors.background,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(color: AppColors.divider),
                       ),
                       child: Text(widget.member.name,
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textPrimary)),
+                          style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.textPrimary)),
                     ),
                     if (widget.member.relation != null) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
                           color: AppColors.brandGreenSurface,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(widget.member.relation!,
-                            style: const TextStyle(fontSize: 11, color: AppColors.brandGreen, fontWeight: FontWeight.w500)),
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.brandGreen,
+                                fontWeight: FontWeight.w500)),
                       ),
                     ],
                   ]),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-                  // ── Upload area ───────────────────────────
-                  const Text('New Prescription',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                  const SizedBox(height: 10),
+                  // ── Upload section header ─────────────────
+                  Row(
+                    children: [
+                      const Text('Prescription Images',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                      const Spacer(),
+                      if (_uploads.isNotEmpty)
+                        Text('${_uploads.length} / $_maxFiles',
+                            style: const TextStyle(
+                                fontSize: 12, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
 
-                  if (!_uploaded)
+                  // ── Image grid ───────────────────────────
+                  if (_uploads.isNotEmpty) ...[
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        ..._uploads.asMap().entries.map((e) =>
+                            _ThumbnailCard(
+                              doc: e.value,
+                              onView: () => _viewImage(e.key),
+                              onDelete: () => _deleteImage(e.key),
+                            )),
+                        if (canAddMore)
+                          _AddMoreTile(
+                            isPicking: _isPicking,
+                            onTap: _showSourcePicker,
+                          ),
+                      ],
+                    ),
+                  ] else ...[
+                    // ── Empty upload drop zone ────────────
                     GestureDetector(
-                      onTap: _mockUpload,
+                      onTap: _isPicking ? null : _showSourcePicker,
                       child: Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 28),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 32),
                         decoration: BoxDecoration(
                           color: AppColors.background,
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.divider, width: 1.5),
+                          border: Border.all(
+                              color: AppColors.divider, width: 1.5),
                         ),
-                        child: Column(children: const [
-                          Icon(Icons.upload_file_outlined, size: 36, color: AppColors.brandGreen),
-                          SizedBox(height: 10),
-                          Text('Tap to upload prescription',
-                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.brandGreen)),
-                          SizedBox(height: 4),
-                          Text('JPG, PNG or PDF — max 5MB',
-                              style: TextStyle(fontSize: 11, color: AppColors.textHint)),
-                        ]),
-                      ),
-                    ),
-
-                  if (_uploaded) ...[
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.brandGreenSurface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.brandGreen, width: 1.5),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.insert_drive_file_outlined, size: 28, color: AppColors.brandGreen),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(_uploadedFileName ?? 'prescription.jpg',
-                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
-                                    overflow: TextOverflow.ellipsis),
-                                Text('Uploaded ${_uploadedDate != null ? _formatDate(_uploadedDate!) : ''}',
-                                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          // View icon
-                          GestureDetector(
-                            onTap: _viewPrescription,
-                            child: Container(
-                              width: 36, height: 36,
-                              decoration: BoxDecoration(
-                                color: AppColors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppColors.brandGreenLight),
-                              ),
-                              child: const Icon(Icons.visibility_outlined, size: 18, color: AppColors.brandGreen),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          // Remove icon
-                          GestureDetector(
-                            onTap: () => setState(() { _uploaded = false; _uploadedFileName = null; _uploadedDate = null; }),
-                            child: Container(
-                              width: 36, height: 36,
-                              decoration: BoxDecoration(
-                                color: AppColors.white,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppColors.divider),
-                              ),
-                              child: const Icon(Icons.close_rounded, size: 18, color: AppColors.textHint),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    // Status badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _statusColor(_status).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: _statusColor(_status).withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.circle, size: 8, color: _statusColor(_status)),
-                          const SizedBox(width: 6),
-                          Text(_status,
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _statusColor(_status))),
-                        ],
+                        child: _isPicking
+                            ? const Center(
+                                child: SizedBox(
+                                  width: 28, height: 28,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: AppColors.brandGreen,
+                                  ),
+                                ),
+                              )
+                            : const Column(children: [
+                                Icon(Icons.add_photo_alternate_outlined,
+                                    size: 40, color: AppColors.brandGreen),
+                                SizedBox(height: 10),
+                                Text('Tap to add prescription images',
+                                    style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                        color: AppColors.brandGreen)),
+                                SizedBox(height: 4),
+                                Text('Camera or Gallery · JPG, PNG · max 5MB',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textHint)),
+                              ]),
                       ),
                     ),
                   ],
 
-                  // ── Previous prescriptions ────────────────
+                  // ── Previous prescriptions ───────────────
                   if (_previous.isNotEmpty) ...[
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
                     const Text('Previous Uploads',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary)),
                     const SizedBox(height: 10),
                     ..._previous.map((p) => Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.background,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.divider),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.insert_drive_file_outlined, size: 16, color: AppColors.textHint),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(p['file'],
-                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.textPrimary),
-                                    overflow: TextOverflow.ellipsis),
-                              ),
-                              GestureDetector(
-                                onTap: _viewPrescription,
-                                child: const Icon(Icons.visibility_outlined, size: 18, color: AppColors.brandGreen),
-                              ),
-                            ],
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: AppColors.background,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.divider),
                           ),
-                          const SizedBox(height: 6),
-                          Row(children: [
-                            const Icon(Icons.calendar_today_outlined, size: 11, color: AppColors.textHint),
-                            const SizedBox(width: 4),
-                            Text(p['date'], style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                          ]),
-                          const SizedBox(height: 6),
-                          // Status
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: _statusColor(p['status']).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(p['status'],
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _statusColor(p['status']))),
-                          ),
-                          const SizedBox(height: 6),
-                          // Action taken
-                          Row(
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(Icons.check_circle_outline, size: 13, color: AppColors.brandGreen),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(p['action'],
-                                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, height: 1.4)),
+                              Row(children: [
+                                const Icon(
+                                    Icons.insert_drive_file_outlined,
+                                    size: 16,
+                                    color: AppColors.textHint),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(p['file'],
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: AppColors.textPrimary),
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                              ]),
+                              const SizedBox(height: 6),
+                              Row(children: [
+                                const Icon(Icons.calendar_today_outlined,
+                                    size: 11, color: AppColors.textHint),
+                                const SizedBox(width: 4),
+                                Text(p['date'],
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textSecondary)),
+                              ]),
+                              const SizedBox(height: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: _statusColor(p['status'])
+                                      .withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(p['status'],
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: _statusColor(p['status']))),
+                              ),
+                              const SizedBox(height: 6),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.check_circle_outline,
+                                      size: 13,
+                                      color: AppColors.brandGreen),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(p['action'],
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.textSecondary,
+                                            height: 1.4)),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    )),
+                        )),
                   ],
 
                   const SizedBox(height: 16),
@@ -2300,27 +2487,344 @@ class _PrescriptionUploadSheetState extends State<_PrescriptionUploadSheet> {
             ),
           ),
 
-          // Submit button
+          // ── Submit button ────────────────────────────────
           Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, MediaQuery.of(context).padding.bottom + 16),
+            padding: EdgeInsets.fromLTRB(
+                16, 8, 16, MediaQuery.of(context).padding.bottom + 16),
             child: SizedBox(
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: _uploaded ? _submit : null,
+                onPressed: _uploads.isNotEmpty ? _submit : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.brandGreen,
-                  disabledBackgroundColor: AppColors.brandGreen.withOpacity(0.35),
+                  disabledBackgroundColor:
+                      AppColors.brandGreen.withValues(alpha: 0.35),
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
                 ),
-                child: const Text('Submit Prescription',
-                    style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500)),
+                child: Text(
+                  _uploads.isEmpty
+                      ? 'Upload at least 1 image'
+                      : 'Submit ${_uploads.length} Image${_uploads.length > 1 ? 's' : ''}',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500),
+                ),
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Prescription document model ─────────────────────────────────────────────
+
+class _PresDoc {
+  final Uint8List bytes;
+  final String fileName;
+  final DateTime uploadedAt;
+  const _PresDoc(
+      {required this.bytes,
+      required this.fileName,
+      required this.uploadedAt});
+}
+
+// ─── Thumbnail card ───────────────────────────────────────────────────────────
+
+class _ThumbnailCard extends StatelessWidget {
+  final _PresDoc doc;
+  final VoidCallback onView;
+  final VoidCallback onDelete;
+  const _ThumbnailCard(
+      {required this.doc, required this.onView, required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onView,
+      child: SizedBox(
+        width: 96,
+        height: 96,
+        child: Stack(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.memory(doc.bytes,
+                  width: 96,
+                  height: 96,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                        width: 96,
+                        height: 96,
+                        color: AppColors.brandGreenSurface,
+                        child: const Icon(Icons.insert_drive_file_outlined,
+                            color: AppColors.brandGreen, size: 32),
+                      )),
+            ),
+            // Dark overlay hint
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.3),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Delete button (top-right)
+            Positioned(
+              top: 4,
+              right: 4,
+              child: GestureDetector(
+                onTap: onDelete,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: const BoxDecoration(
+                      color: Colors.red, shape: BoxShape.circle),
+                  child: const Icon(Icons.close_rounded,
+                      size: 13, color: Colors.white),
+                ),
+              ),
+            ),
+            // View icon (bottom-right)
+            Positioned(
+              bottom: 6,
+              right: 6,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(Icons.fullscreen_rounded,
+                    size: 14, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Add-more tile ────────────────────────────────────────────────────────────
+
+class _AddMoreTile extends StatelessWidget {
+  final bool isPicking;
+  final VoidCallback onTap;
+  const _AddMoreTile({required this.isPicking, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: isPicking ? null : onTap,
+        child: Container(
+          width: 96,
+          height: 96,
+          decoration: BoxDecoration(
+            color: AppColors.brandGreenSurface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: AppColors.brandGreen, width: 1.5),
+          ),
+          child: isPicking
+              ? const Center(
+                  child: SizedBox(
+                    width: 22, height: 22,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.brandGreen),
+                  ),
+                )
+              : const Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.add_rounded,
+                        size: 28, color: AppColors.brandGreen),
+                    SizedBox(height: 4),
+                    Text('Add more',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.brandGreen,
+                            fontWeight: FontWeight.w500)),
+                  ],
+                ),
+        ),
+      );
+}
+
+// ─── Source picker tile ───────────────────────────────────────────────────────
+
+class _SourceTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String sub;
+  final VoidCallback onTap;
+  const _SourceTile(
+      {required this.icon,
+      required this.label,
+      required this.sub,
+      required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Row(children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: const BoxDecoration(
+                  color: AppColors.brandGreenSurface,
+                  shape: BoxShape.circle),
+              child: Icon(icon, size: 22, color: AppColors.brandGreen),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  Text(sub,
+                      style: const TextStyle(
+                          fontSize: 12, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.textHint, size: 20),
+          ]),
+        ),
+      );
+}
+
+// ─── Full-screen image viewer ─────────────────────────────────────────────────
+
+class _ImageViewerPage extends StatefulWidget {
+  final List<_PresDoc> docs;
+  final int initialIndex;
+  const _ImageViewerPage(
+      {required this.docs, required this.initialIndex});
+
+  @override
+  State<_ImageViewerPage> createState() => _ImageViewerPageState();
+}
+
+class _ImageViewerPageState extends State<_ImageViewerPage> {
+  late final PageController _pageCtrl;
+  late int _current;
+
+  @override
+  void initState() {
+    super.initState();
+    _current = widget.initialIndex;
+    _pageCtrl = PageController(initialPage: _current);
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: Text(
+          '${_current + 1} / ${widget.docs.length}',
+          style: const TextStyle(color: Colors.white, fontSize: 15),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Text(
+                widget.docs[_current].fileName,
+                style: const TextStyle(
+                    color: Colors.white60, fontSize: 11),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: PageView.builder(
+        controller: _pageCtrl,
+        itemCount: widget.docs.length,
+        onPageChanged: (i) => setState(() => _current = i),
+        itemBuilder: (_, i) => InteractiveViewer(
+          minScale: 0.8,
+          maxScale: 5.0,
+          child: Center(
+            child: Image.memory(
+              widget.docs[i].bytes,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.broken_image_outlined,
+                        color: Colors.white38, size: 48),
+                    SizedBox(height: 8),
+                    Text('Unable to preview',
+                        style: TextStyle(color: Colors.white38)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      // Page indicator dots
+      bottomNavigationBar: widget.docs.length > 1
+          ? Container(
+              color: Colors.black,
+              padding: EdgeInsets.fromLTRB(
+                  16, 10, 16, MediaQuery.of(context).padding.bottom + 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  widget.docs.length,
+                  (i) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    width: _current == i ? 20 : 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: _current == i
+                          ? AppColors.brandGreen
+                          : Colors.white24,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null,
     );
   }
 }
