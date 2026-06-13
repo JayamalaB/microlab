@@ -264,69 +264,78 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
 
   Widget _buildCartBar(BuildContext context) {
     final bottomPad = MediaQuery.of(context).padding.bottom;
+
+    final pill = Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: AppColors.brandGreen,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.brandGreen.withValues(alpha: 0.30),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.20),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text('${_cart.length}',
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 13, fontWeight: FontWeight.w700)),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${_cart.length} item${_cart.length > 1 ? 's' : ''} added',
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                Text('₹${_cartTotal.toInt()} total',
+                    style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.80), fontSize: 11)),
+              ],
+            ),
+          ),
+          ElevatedButton(
+            onPressed: _showCart,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: AppColors.brandGreen,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('View Cart',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+
+    // Embedded: floating pill only — no white wrapper, no extra safe area
+    if (widget.embedded) return pill;
+
+    // Non-embedded: full-width bottom bar with safe-area padding
     return Container(
       padding: EdgeInsets.fromLTRB(16, 10, 16, bottomPad + 10),
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: AppColors.divider)),
       ),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-        decoration: BoxDecoration(
-          color: AppColors.brandGreen,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.brandGreen.withValues(alpha: 0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text('${_cart.length}',
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('${_cart.length} item${_cart.length > 1 ? 's' : ''} added',
-                      style: const TextStyle(
-                          color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                  Text('₹${_cartTotal.toInt()} total',
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.8), fontSize: 11)),
-                ],
-              ),
-            ),
-            ElevatedButton(
-              onPressed: _showCart,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: AppColors.brandGreen,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: const Text('View Cart',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            ),
-          ],
-        ),
-      ),
+      child: pill,
     );
   }
 
@@ -593,7 +602,7 @@ class _CustomerDashboardScreenState extends State<CustomerDashboardScreen> {
             Positioned(
               left: 16,
               right: 16,
-              bottom: MediaQuery.of(context).padding.bottom + 16,
+              bottom: MediaQuery.of(context).padding.bottom + 8,
               child: _buildCartBar(context),
             ),
         ],
@@ -2755,22 +2764,11 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
         backgroundColor: Colors.black,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Text(
-          '${_current + 1} / ${widget.docs.length}',
-          style: const TextStyle(color: Colors.white, fontSize: 15),
+          widget.docs.length > 1
+              ? 'Photo ${_current + 1} of ${widget.docs.length}'
+              : 'Photo',
+          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                widget.docs[_current].fileName,
-                style: const TextStyle(
-                    color: Colors.white60, fontSize: 11),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
-        ],
       ),
       body: PageView.builder(
         controller: _pageCtrl,
@@ -2781,7 +2779,7 @@ class _ImageViewerPageState extends State<_ImageViewerPage> {
           maxScale: 5.0,
           child: Center(
             child: Image.memory(
-              widget.docs[i].bytes,
+              widget.docs[i].bytes, 
               fit: BoxFit.contain,
               errorBuilder: (_, __, ___) => const Center(
                 child: Column(

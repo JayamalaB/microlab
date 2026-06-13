@@ -2044,21 +2044,11 @@ class _DocImageViewerPageState extends State<_DocImageViewerPage> {
           backgroundColor: Colors.black,
           iconTheme: const IconThemeData(color: Colors.white),
           title: Text(
-            '${_current + 1} / ${widget.images.length}',
-            style: const TextStyle(color: Colors.white, fontSize: 14),
+            widget.images.length > 1
+                ? 'Photo ${_current + 1} of ${widget.images.length}'
+                : 'Photo',
+            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
           ),
-          actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 16),
-              child: Center(
-                child: Text(
-                  widget.images[_current].fileName,
-                  style: const TextStyle(color: Colors.white70, fontSize: 11),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-          ],
         ),
         body: Column(children: [
           Expanded(

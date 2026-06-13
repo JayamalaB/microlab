@@ -216,10 +216,10 @@ class _CustomerHomeScreenState extends State<CustomerHomeScreen> {
               ),
             ],
           ),
-          // Chatbot FAB — always visible, positioned well above the FAB / bottom-nav zone
+          // Chatbot FAB — sits above the cart bar when visible (cart bar top ≈ 96px)
           const Positioned(
             right: 16,
-            bottom: 88,
+            bottom: 110,
             child: SupportChatbotButton(),
           ),
         ],
